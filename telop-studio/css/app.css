@@ -116,7 +116,14 @@ details.card[open] > summary { margin-bottom: 10px; }
 .dz-row input[type=color] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
 .dz-row small { color: var(--muted); }
 .dz-font { flex-wrap: wrap; }
+.dz-strokes { grid-row: span 2; }
+.dz-stroke { border-top: 1px dashed var(--line); padding-top: 6px; margin-top: 8px; }
+.dz-stroke:first-of-type { border-top: 0; margin-top: 0; }
+.dz-stroke-head { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.dz-stroke-head b { flex: 1; color: var(--text); }
+.dz-empty { color: var(--muted); font-size: 12px; margin: 6px 0; }
 .design-actions { margin-top: 10px; }
+.design-actions label.button { flex: none; display: inline-flex; flex-direction: row; color: var(--text); font-size: 12px; }
 label.button.small { padding: 5px 12px; font-size: 12px; margin-top: 8px; }
 label.check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 

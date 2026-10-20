@@ -38,11 +38,24 @@ const canvas = (w, h) => {
   return c;
 };
 
-function paintStyle(ctx, paint, y0, y1) {
+// 塗り: 色 / 色の配列（上→下）/ { stops: [色...], angle: 度 }（0°=上→下、90°=左→右。box の範囲にかける）
+function paintStyle(ctx, paint, y0, y1, box) {
   if (typeof paint === "string") return paint;
-  if (paint.length === 1) return paint[0];
-  const g = ctx.createLinearGradient(0, y0, 0, y1);
-  paint.forEach((c, i) => g.addColorStop(i / (paint.length - 1), c));
+  if (Array.isArray(paint)) {
+    if (paint.length === 1) return paint[0];
+    const g = ctx.createLinearGradient(0, y0, 0, y1);
+    paint.forEach((c, i) => g.addColorStop(i / (paint.length - 1), c));
+    return g;
+  }
+  const stops = paint.stops || [];
+  if (stops.length < 2) return stops[0] || "#ffffff";
+  const b = box || { x0: 0, y0, x1: 0, y1 };
+  const a = ((paint.angle || 0) * Math.PI) / 180;
+  const dx = Math.sin(a), dy = Math.cos(a);
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+  const half = Math.abs(((b.x1 - b.x0) / 2) * dx) + Math.abs(((b.y1 - b.y0) / 2) * dy) || 1;
+  const g = ctx.createLinearGradient(cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half);
+  stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
   return g;
 }
 
@@ -154,7 +167,7 @@ export class Block {
       for (const [ch, acc] of line) {
         measureCtx.font = font;
         const mt = measureCtx.measureText(ch);
-        if (ch.trim()) this.glyphs.push(this.makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc));
+        if (ch.trim()) this.glyphs.push(this.makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc, textW));
         pen += mt.width + trkEm * size;
       }
     });
@@ -195,7 +208,7 @@ export class Block {
     this.charEnd = st.char ? (st.char_delay || 0) + (st.stagger || 0.03) * this.glyphs.length + CHAR_DUR[st.char] : 0;
   }
 
-  makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc) {
+  makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc, textW) {
     const l = -mt.actualBoundingBoxLeft - maxsw, r = mt.actualBoundingBoxRight + maxsw;
     const t = -mt.actualBoundingBoxAscent - maxsw, b = mt.actualBoundingBoxDescent + maxsw;
     const g = { w: Math.ceil(r - l + 2 * m), h: Math.ceil(b - t + 2 * m) };
@@ -223,9 +236,12 @@ export class Block {
         ctx.translate(sh.dx, sh.dy);
         shape(ctx, maxsw, sh.color);
       }));
-    for (const s of [...strokes].reverse()) g.layers.push(layer((ctx) => shape(ctx, s.w, s.color)));
+    // グラデーションをかける範囲 = その行の文字全体（字ごとにバラバラにならないように）
+    const box = { x0: -g.x, x1: textW - g.x, y0: oy - cap, y1: oy + desc };
+    for (const s of [...strokes].reverse())
+      g.layers.push(layer((ctx) => shape(ctx, s.w, paintStyle(ctx, s.color, box.y0 - s.w, box.y1 + s.w, box))));
     const fill = acc && this.st.accent ? this.st.accent : this.st.fill;
-    g.layers.push(layer((ctx) => shape(ctx, 0, paintStyle(ctx, fill, oy - cap, oy + desc))));
+    g.layers.push(layer((ctx) => shape(ctx, 0, paintStyle(ctx, fill, oy - cap, oy + desc, box))));
     return g;
   }
 
