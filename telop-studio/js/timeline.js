@@ -151,11 +151,42 @@ export function buildLines(chunks, speech, duration) {
       const a = at(acc / n);
       acc += p.length;
       const b = at(acc / n);
-      lines.push({ id: crypto.randomUUID(), src: [a, b], text: wrapLine(p), cut: false, fx: "", fxText: "" });
+      // 改行は出力の形（縦/横）に合わせて表示時に入れる
+      lines.push({ id: crypto.randomUUID(), src: [a, b], text: p, cut: false, fx: "", fxText: "" });
     }
   });
   return lines;
 }
+
+// ---------------------------------------------------------------- clips
+// 複数の素材を1本の時間軸に並べる。境目は 20ms の倍数にそろえて音量データとずれないようにする
+export const FRAME = 0.02;
+export function layoutClips(clips) {
+  let off = 0;
+  for (const c of clips) {
+    c.offset = off;
+    c.span = Math.ceil(c.duration / FRAME) * FRAME;
+    off += c.span;
+  }
+  return off;
+}
+
+// しゃべっている区間を素材の境目で分け、どの素材かを付ける（境目をまたぐ区間を作らない）
+export function splitAtClips(speech, clips) {
+  const out = [];
+  for (const r of speech) {
+    clips.forEach((c, i) => {
+      const a = Math.max(r.start, c.offset), b = Math.min(r.end, c.offset + c.duration);
+      if (b - a > 0.05) out.push({ start: a, end: b, clip: i });
+    });
+  }
+  return out;
+}
+
+export const clipAt = (clips, t) => {
+  for (let i = clips.length - 1; i >= 0; i--) if (t >= clips[i].offset - 1e-6) return i;
+  return 0;
+};
 
 // ---------------------------------------------------------------- cut mapping
 // 残す区間 = しゃべっている区間 − 「カット」にチェックした字幕の区間
@@ -166,8 +197,8 @@ export function buildSegments(speech, lines) {
     const next = [];
     for (const s of segs) {
       if (b <= s.start || a >= s.end) { next.push(s); continue; }
-      if (a - s.start > 0.08) next.push({ start: s.start, end: a });
-      if (s.end - b > 0.08) next.push({ start: b, end: s.end });
+      if (a - s.start > 0.08) next.push({ ...s, end: a });
+      if (s.end - b > 0.08) next.push({ ...s, start: b });
     }
     segs = next;
   }
@@ -219,7 +250,8 @@ export function buildItems(lines, segs, settings) {
     end = Math.max(end, t0 + 0.5);
     const fx = FX[l.fx];
     const ownText = l.fxText.trim();
-    if (!(fx && fx.style && !ownText)) items.push({ style: "subtitle", text: l.text, t: t0, d: end - t0, line: l.id });
+    const wrapAt = settings.aspect === "landscape" ? 26 : 13;
+    if (!(fx && fx.style && !ownText)) items.push({ style: "subtitle", text: wrapLine(l.text, wrapAt), t: t0, d: end - t0, line: l.id });
     if (!fx || !fx.style) return;
     const text = ownText || l.text;
     let d = Math.max(1.4, end - t0);

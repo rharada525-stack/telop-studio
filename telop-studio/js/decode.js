@@ -164,6 +164,8 @@ export class FrameReader {
     this.cur = this.next = null;
     this.si = si;
     this.done = false;
+    this.flushing = null;
+    this.gen = (this.gen || 0) + 1;
     if (this.decoder.state === "configured") this.decoder.reset();
     this.decoder.configure(this.v.config);
   }
@@ -174,7 +176,7 @@ export class FrameReader {
       if (this.error) throw this.error;
       if (this.si < s.length) {
         if (this.decoder.decodeQueueSize < 12) {
-          const run = await readRun(this.file, s, this.si, 16 << 20, 30);
+          const run = await readRun(this.file, s, this.si, 16 << 20, 10);
           run.forEach((data, k) => {
             const x = s[this.si + k];
             this.decoder.decode(new EncodedVideoChunk({
@@ -188,11 +190,18 @@ export class FrameReader {
             new Promise((r) => setTimeout(r, 30)),
           ]);
         }
-      } else if (!this.done) {
-        await this.decoder.flush();
-        this.done = true;
-      } else {
+      } else if (this.done) {
         return null;
+      } else {
+        // 最後まで送ったら flush。flush の完了を待ち続けると、受け取っていないフレームと
+        // お互いに待ち合って止まることがあるので、出てきたフレームは先に返す
+        if (!this.flushing) {
+          const gen = this.gen; // 途中で start() し直したら、古い flush の結果は無視する
+          const pending = this.decoder.state === "configured" ? this.decoder.flush() : Promise.resolve();
+          const finish = () => { if (gen === this.gen) this.done = true; };
+          this.flushing = pending.then(finish, finish);
+        }
+        await Promise.race([this.flushing, new Promise((r) => setTimeout(r, 20))]);
       }
     }
     return this.queue.shift();

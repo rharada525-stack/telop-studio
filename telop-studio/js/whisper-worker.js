@@ -10,13 +10,9 @@ self.onmessage = async (e) => {
     const key = `${model}|${device}`;
     if (!asr || loadedKey !== key) {
       self.postMessage({ type: "status", text: "AIモデルを準備中…（初回のみダウンロード）" });
-      // 半精度(fp16)に対応した GPU なら、エンコーダーを fp16 にしてダウンロード量を減らす
-      let f16 = false;
-      if (device === "webgpu") {
-        try { f16 = !!(await navigator.gpu.requestAdapter())?.features.has("shader-f16"); } catch { /* 非対応 */ }
-      }
+      // fp16 エンコーダーは GPU によって文字起こしが終わらなくなることがあるため、base/small は fp32 を使う
       const dtype = device === "webgpu"
-        ? { encoder_model: f16 || model.includes("turbo") ? "fp16" : "fp32", decoder_model_merged: "q4" }
+        ? { encoder_model: model.includes("turbo") ? "fp16" : "fp32", decoder_model_merged: "q4" }
         : "q8";
       asr = await pipeline("automatic-speech-recognition", model, {
         device,

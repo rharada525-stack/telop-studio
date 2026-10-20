@@ -10,3 +10,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 動作確認で作る一時素材
+test-footage/_tmp/

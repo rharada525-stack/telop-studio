@@ -11,6 +11,7 @@
   --radius: 12px;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg); color: var(--text);
@@ -92,6 +93,24 @@ td.cut { width: 48px; text-align: center; }
 tr.current td { background: #2b2230; }
 tr.is-cut td { opacity: .45; }
 tr.is-cut textarea { text-decoration: line-through; }
+
+/* 書き出し中は表と素材リストを触れないようにする */
+body.busy #step1, body.busy #step3 { pointer-events: none; opacity: .55; }
+
+/* 素材リスト */
+.clip-list { list-style: none; counter-reset: clip; margin: 0 0 12px; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+.clip-list li { counter-increment: clip; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.clip-list li:first-child { border-top: 0; }
+.clip-list li::before { content: counter(clip); width: 20px; height: 20px; border-radius: 50%; background: #2e333c; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.clip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-dur { color: var(--muted); font-size: 12px; }
+button.icon { background: none; border: 1px solid var(--line); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; color: var(--text); padding: 0; }
+tr.clip-sep td { background: #262a32; color: var(--accent2); font-size: 12px; font-weight: 700; padding: 4px 8px; }
+
+/* 横 16:9 のときはプレビューを広く */
+body.landscape .layout { grid-template-columns: minmax(420px, 1.25fr) 1fr; }
+body.landscape .phone { height: auto; width: 100%; max-width: 900px; aspect-ratio: 16 / 9; }
+body.landscape .transport { max-width: 900px; }
 
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; height: auto; }

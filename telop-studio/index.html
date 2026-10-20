@@ -11,7 +11,7 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">テロップスタジオ <span class="tag">ショート動画</span></div>
+  <div class="brand">テロップスタジオ <span class="tag">自動カット＋テロップ</span></div>
   <div class="top-actions">
     <button id="btnSaveProject" class="ghost" disabled>作業を保存</button>
     <label class="ghost button">作業を開く<input id="inpProject" type="file" accept=".json" hidden></label>
@@ -30,21 +30,28 @@
       <input id="seek" type="range" min="0" max="1" step="0.001" value="0" disabled>
       <span id="time" class="mono">0:00.0 / 0:00.0</span>
     </div>
-    <video id="video" playsinline preload="auto" hidden></video>
   </section>
 
   <section class="panel">
     <div class="card" id="step1">
       <h2><span class="num">1</span>素材を選ぶ</h2>
       <label class="dropzone" id="dropzone">
-        <input id="inpVideo" type="file" accept="video/*" hidden>
-        <span id="fileLabel">話している動画を選ぶ（またはドロップ）</span>
+        <input id="inpVideo" type="file" accept="video/*" multiple hidden>
+        <span id="fileLabel">話している動画を選ぶ（複数まとめてOK・ドロップでも可）</span>
       </label>
+      <ol id="clipList" class="clip-list" hidden></ol>
       <div class="row">
+        <label>出力の形
+          <select id="selAspect">
+            <option value="portrait">縦 9:16（ショート・リール・TikTok）</option>
+            <option value="landscape">横 16:9（YouTube など）</option>
+          </select>
+        </label>
         <label>画面の合わせ方
           <select id="selLayout">
-            <option value="cover">縦に切り抜く（縦長の素材）</option>
-            <option value="fit">全体を表示＋ぼかし背景（横長の素材）</option>
+            <option value="auto">おまかせ（素材ごとに自動）</option>
+            <option value="cover">画面いっぱいに切り抜く</option>
+            <option value="fit">全体を表示＋ぼかし背景（縦横が違う素材）</option>
           </select>
         </label>
         <label>タイトル帯（空なら出さない）
@@ -58,8 +65,8 @@
       <div class="row">
         <label>文字起こしの精度
           <select id="selModel">
-            <option value="onnx-community/whisper-base">速い（初回ダウンロード 約150〜200MB）</option>
-            <option value="onnx-community/whisper-small" selected>標準（初回ダウンロード 約400〜550MB）</option>
+            <option value="onnx-community/whisper-base">速い（初回ダウンロード 約200MB）</option>
+            <option value="onnx-community/whisper-small" selected>標準（初回ダウンロード 約550MB）</option>
             <option value="onnx-community/whisper-large-v3-turbo">高精度（初回ダウンロード 約1.5GB・高性能PC向け）</option>
           </select>
         </label>

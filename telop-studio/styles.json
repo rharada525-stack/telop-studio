@@ -1,5 +1,21 @@
 {
-  "_comment": "テロップのデザイン定義。strokes の w は文字の輪郭からの累積幅(px)。{...} で囲んだ文字は accent の塗りになる。",
+  "_comment": "テロップのデザイン定義。strokes の w は文字の輪郭からの累積幅(px)。{...} で囲んだ文字は accent の塗りになる。_landscape は横長(1920x1080)のときだけ上書きする値。",
+
+  "_landscape": {
+    "hook":             { "pos": [960, 470], "max_width": 1500 },
+    "keyword":          { "pos": [960, 640], "max_width": 1500, "size": 104 },
+    "subtitle":         { "pos": [960, 950], "max_width": 1720, "size": 62 },
+    "tsukkomi":         { "pos": [1560, 560], "max_width": 560, "size": 112 },
+    "tsukkomi_green":   { "pos": [380, 560], "max_width": 560, "size": 112 },
+    "point":            { "pos": [960, 240] },
+    "point_body":       { "max_width": 1200 },
+    "header":           { "pos": [280, 80], "size": 40, "max_width": 520 },
+    "reveal":           { "pos": [960, 480], "max_width": 1500, "size": 150 },
+    "cta_main":         { "pos": [960, 470], "max_width": 1500, "size": 104 },
+    "cta":              { "pos": [960, 760] },
+    "speedlines":       { "center": [960, 520] },
+    "speedlines_white": { "center": [960, 480] }
+  },
 
   "hook": {
     "z": 5, "font": "NotoSansJP-Black.otf", "size": 150, "max_width": 980,

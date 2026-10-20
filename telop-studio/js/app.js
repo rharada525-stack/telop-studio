@@ -1,8 +1,8 @@
 import { resolveStyles } from "./telop.js";
-import { Renderer, W, H } from "./render.js";
+import { Renderer } from "./render.js";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
-  totalDuration, srcToOut, outToSrc, toSrt, FX,
+  totalDuration, srcToOut, outToSrc, toSrt, FX, FRAME, layoutClips, splitAtClips, clipAt,
 } from "./timeline.js";
 import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
@@ -10,29 +10,32 @@ import { openMedia, decodeAudioTrack } from "./decode.js";
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
 const ctx = canvas.getContext("2d");
-const video = $("video");
+const LONG_WARN = 20 * 60; // これより長いと重くなる（秒）
 
 const state = {
-  file: null,
-  audio: null,      // 元の音声（48kHz）
-  db: null,         // 20msごとの音量
+  clips: [],        // 素材: { id, file, media, audio, db, pcm, video, duration, offset, span }
+  db: null,         // 全素材をつないだ 20ms ごとの音量
+  pcm: null,        // 全素材をつないだ 16kHz モノラル（文字起こし用）
   speech: [],
   lines: [],
   segs: [],
-  settings: { title: "", layout: "cover", gap: 0.3 },
+  settings: { title: "", layout: "auto", gap: 0.3, aspect: "portrait" },
   t: 0,             // 出力側の再生位置（秒）
   playing: false,
 };
 let renderer, sfxBuffers = {};
 
 const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
-const projectKey = (f) => `telop-studio:${f.name}:${f.size}`;
+const projectKey = () => "telop-studio:" + state.clips.map((c) => `${c.file.name}:${c.file.size}`).join("|");
+const baseName = () => (state.clips[0]?.file.name || "video").replace(/\.[^.]+$/, "");
+const sourceDuration = () => state.clips.reduce((a, c) => a + c.duration, 0);
 
 // ---------------------------------------------------------------- init
 async function init() {
-  if (!("VideoEncoder" in window) || !("requestVideoFrameCallback" in HTMLVideoElement.prototype)) $("unsupported").hidden = false;
-  const styles = resolveStyles(await (await fetch("styles.json")).json());
-  renderer = new Renderer(styles);
+  if (!("VideoEncoder" in window) || !("AudioDecoder" in window)) $("unsupported").hidden = false;
+  const raw = await (await fetch("styles.json")).json();
+  const styles = resolveStyles(raw);
+  renderer = new Renderer(styles, raw);
   const ac = new AudioContext();
   const names = [...new Set(Object.values(styles).map((s) => s.sfx).filter(Boolean)), "drumroll"];
   await Promise.all(names.map(async (n) => {
@@ -40,59 +43,142 @@ async function init() {
   }));
   ac.close();
   await document.fonts.load('900 40px "Noto Sans JP"', "テロップ");
-  drawIdle();
+  applyFormat();
 }
 
-function drawIdle() {
+// 縦 9:16 / 横 16:9 の切り替え
+function applyFormat() {
+  const a = state.settings.aspect;
+  renderer.setFormat(a);
+  canvas.width = renderer.W;
+  canvas.height = renderer.H;
+  document.body.classList.toggle("landscape", a === "landscape");
+  $("selAspect").value = a;
   ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-// ---------------------------------------------------------------- step 1: file
-async function loadVideo(file) {
+// ---------------------------------------------------------------- step 1: clips
+async function addFiles(files) {
+  files = [...files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$/i.test(f.name));
+  if (!files.length) return;
+  if (state.lines.length && !confirm("素材を追加すると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
   stop();
-  state.file = file;
-  $("fileLabel").textContent = `${file.name}（${(file.size / 1e6).toFixed(1)}MB）`;
-  $("dropzone").classList.add("loaded");
-  $("dropHint").hidden = true;
-  if (video.src) URL.revokeObjectURL(video.src);
-  video.src = URL.createObjectURL(file);
+  files.sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
+  for (const [i, file] of files.entries()) {
+    const label = files.length > 1 ? `素材 ${i + 1}/${files.length}` : "素材";
+    try {
+      state.clips.push(await loadClip(file, (msg) => setStatus("anaStatus", `${label}：${msg}`)));
+    } catch (e) {
+      console.error(e);
+      setStatus("anaStatus", `「${file.name}」を読み込めませんでした：${e.message}`, true);
+      renderClipList();
+      return;
+    }
+  }
+  await clipsChanged(true);
+}
+
+async function loadClip(file, status) {
+  const video = Object.assign(document.createElement("video"), { playsInline: true, preload: "auto", src: URL.createObjectURL(file) });
   await Promise.race([
     new Promise((r) => video.addEventListener("loadeddata", r, { once: true })),
     new Promise((r) => setTimeout(r, 8000)),
   ]);
-  setStatus("anaStatus", "動画を読み込み中…");
-  try {
-    // MP4/MOV は必要な部分だけ少しずつ読む（数GBでもOK）
-    state.media = await openMedia(file);
-    if (state.media && !state.media.audio) throw new Error("音声の入っていない動画です。");
-    if (state.media) {
-      state.audio = await decodeAudioTrack(state.media, (p) => setStatus("anaStatus", `音声を読み込み中… ${Math.round(p * 100)}%`));
-    } else if (file.size > 800e6) {
-      throw new Error("この形式の大きいファイルには対応していません。MP4 か MOV で書き出した素材を使ってください。");
-    } else {
-      state.audio = await decodeAudio(file);
-    }
-  } catch (e) {
-    console.error(e);
-    setStatus("anaStatus", `読み込めませんでした：${e.message}`, true);
+  status("読み込み中…");
+  // MP4/MOV は必要な部分だけ少しずつ読む（数GBでもOK）
+  const media = await openMedia(file);
+  if (media && !media.audio) throw new Error("音声の入っていない動画です。");
+  let audio;
+  if (media) audio = await decodeAudioTrack(media, (p) => status(`音声を読み込み中… ${Math.round(p * 100)}%`));
+  else if (file.size > 800e6) throw new Error("この形式の大きいファイルには対応していません。MP4 か MOV を使ってください。");
+  else audio = await decodeAudio(file);
+  const pcm = await toMono16k(audio);
+  return { id: crypto.randomUUID(), file, media, video, audio, pcm, db: loudness(pcm), duration: media ? media.duration : audio.duration };
+}
+
+// 素材の並び・数が変わったとき：つないだ音声を作り直す
+async function clipsChanged(fromAdd) {
+  renderClipList();
+  const has = state.clips.length > 0;
+  $("dropHint").hidden = has;
+  $("dropzone").classList.toggle("loaded", has);
+  $("btnAnalyze").disabled = !has;
+  if (!has) {
+    Object.assign(state, { db: null, pcm: null, speech: [], lines: [], segs: [], items: [] });
+    await renderer.setItems([]);
+    renderTable();
+    applyFormat();
+    for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = true;
+    $("cutSummary").textContent = "";
+    $("time").textContent = "0:00.0 / 0:00.0";
+    setStatus("anaStatus", "音声は外部に送信されず、このパソコンの中だけで処理されます。");
     return;
   }
-  const pcm = await toMono16k(state.audio);
-  state.db = loudness(pcm);
-  state.pcm = pcm;
-  $("btnAnalyze").disabled = false;
-
-  const saved = localStorage.getItem(projectKey(file));
+  const total = layoutClips(state.clips);
+  const nFr = Math.round(total / FRAME);
+  state.db = new Float32Array(nFr).fill(-100);
+  state.pcm = new Float32Array(Math.round(total * 16000));
+  for (const c of state.clips) {
+    state.db.set(c.db.subarray(0, Math.round(c.span / FRAME)), Math.round(c.offset / FRAME));
+    state.pcm.set(c.pcm.subarray(0, Math.round(c.span * 16000)), Math.round(c.offset * 16000));
+  }
+  state.lines = [];
+  state.t = 0;
+  const saved = localStorage.getItem(projectKey());
   if (saved) {
     applyProject(JSON.parse(saved));
     setStatus("anaStatus", "前回の作業を復元しました。最初からやり直す場合は「解析する」を押してください。");
+  } else if (fromAdd && state.pendingProject) {
+    applyProject(state.pendingProject);
+    state.pendingProject = null;
+    setStatus("anaStatus", "読み込んだ作業を使います。");
   } else {
-    state.speech = detectSpeech(state.db, { gap: state.settings.gap });
-    if (state.lines.length) setStatus("anaStatus", "読み込んだ作業を使います。");
-    else setStatus("anaStatus", "「解析する」を押すと、無言部分のカットと文字起こしをします。");
+    const long = sourceDuration() > LONG_WARN ? `（合計 ${fmt(sourceDuration())}。長い素材は文字起こしに時間がかかります）` : "";
+    setStatus("anaStatus", `「解析する」を押すと、無言部分のカットと文字起こしをします。${long}`);
   }
+  computeSpeech();
   await refresh(true);
+}
+
+function computeSpeech() {
+  if (state.db) state.speech = splitAtClips(detectSpeech(state.db, { gap: state.settings.gap }), state.clips);
+}
+
+function renderClipList() {
+  const ol = $("clipList");
+  ol.innerHTML = "";
+  ol.hidden = !state.clips.length;
+  state.clips.forEach((c, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="clip-name"></span><span class="mono clip-dur"></span>
+      <button class="icon" title="前へ">↑</button><button class="icon" title="後ろへ">↓</button><button class="icon" title="外す">✕</button>`;
+    li.querySelector(".clip-name").textContent = c.file.name;
+    li.querySelector(".clip-dur").textContent = fmt(c.duration);
+    const [up, down, del] = li.querySelectorAll("button");
+    up.disabled = i === 0;
+    down.disabled = i === state.clips.length - 1;
+    const move = async (j) => {
+      if (state.lines.length && !confirm("並び順を変えると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
+      stop();
+      const [c2] = state.clips.splice(i, 1);
+      state.clips.splice(j, 0, c2);
+      await clipsChanged(false);
+    };
+    up.onclick = () => move(i - 1);
+    down.onclick = () => move(i + 1);
+    del.onclick = async () => {
+      if (state.lines.length && !confirm("素材を外すと、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
+      stop();
+      const [gone] = state.clips.splice(i, 1);
+      URL.revokeObjectURL(gone.video.src);
+      await clipsChanged(false);
+    };
+    ol.appendChild(li);
+  });
+  $("fileLabel").textContent = state.clips.length
+    ? `素材 ${state.clips.length} 本・合計 ${fmt(sourceDuration())}（ここに追加でドロップできます）`
+    : "話している動画を選ぶ（複数まとめてOK・ドロップでも可）";
 }
 
 // ---------------------------------------------------------------- step 2: analyze
@@ -115,8 +201,8 @@ function analyze() {
       setStatus("anaStatus", m.text);
       if (m.text.startsWith("文字起こし")) showProgress("anaProgress", -1);
     } else if (m.type === "done") {
-      state.speech = detectSpeech(state.db, { gap: state.settings.gap });
-      state.lines = buildLines(m.chunks, state.speech, state.audio.duration);
+      computeSpeech();
+      state.lines = buildLines(m.chunks, state.speech, state.pcm.length / 16000);
       $("btnAnalyze").disabled = false;
       $("anaProgress").hidden = true;
       setStatus("anaStatus", `完了：字幕 ${state.lines.length} 枚`);
@@ -138,16 +224,15 @@ function scheduleRefresh() {
 }
 
 async function refresh(rebuildTable) {
-  if (!state.file) return;
+  if (!state.clips.length) return;
   state.segs = buildSegments(state.speech, state.lines);
   const total = totalDuration(state.segs);
   state.items = buildItems(state.lines, state.segs, state.settings);
   await renderer.setItems(state.items);
   state.t = Math.min(state.t, total);
   $("seek").max = total || 1;
-  $("cutSummary").textContent = state.audio
-    ? `元の長さ ${fmt(state.audio.duration)} → カット後 ${fmt(total)}（${Math.round((1 - total / state.audio.duration) * 100)}% 短縮）`
-    : "";
+  const src = sourceDuration();
+  $("cutSummary").textContent = `元の長さ ${fmt(src)} → カット後 ${fmt(total)}（${Math.round((1 - total / src) * 100)}% 短縮）`;
   if (rebuildTable) renderTable();
   for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = !state.segs.length;
   save();
@@ -158,7 +243,19 @@ function renderTable() {
   const tb = $("lines").querySelector("tbody");
   tb.innerHTML = "";
   const opts = Object.entries(FX).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+  const multi = state.clips.length > 1;
+  let lastClip = -1;
   for (const l of state.lines) {
+    const ci = clipAt(state.clips, l.src[0]);
+    if (multi && ci !== lastClip) {
+      // 素材の切れ目に見出し行を入れる
+      const sep = document.createElement("tr");
+      sep.className = "clip-sep";
+      sep.innerHTML = `<td colspan="5"></td>`;
+      sep.firstChild.textContent = `素材 ${ci + 1}：${state.clips[ci].file.name}`;
+      tb.appendChild(sep);
+      lastClip = ci;
+    }
     const tr = document.createElement("tr");
     tr.dataset.id = l.id;
     tr.innerHTML = `<td class="time"><button class="mono"></button></td>
@@ -172,7 +269,7 @@ function renderTable() {
     ta.value = l.text;
     ta.oninput = () => { l.text = ta.value; scheduleRefresh(); };
     sel.value = l.fx;
-    sel.onchange = () => { l.fx = sel.value; scheduleRefresh(); };
+    sel.onchange = () => { l.fx = sel.value; inp.placeholder = l.fx === "point" ? "その1/本文" : "空なら字幕と同じ"; scheduleRefresh(); };
     inp.value = l.fxText;
     inp.placeholder = l.fx === "point" ? "その1/本文" : "空なら字幕と同じ";
     inp.oninput = () => { l.fxText = inp.value; scheduleRefresh(); };
@@ -185,7 +282,7 @@ function renderTable() {
 
 function highlightRow() {
   const cur = state.items?.find((it) => it.style === "subtitle" && state.t >= it.t && state.t < it.t + it.d);
-  for (const tr of $("lines").querySelectorAll("tbody tr")) {
+  for (const tr of $("lines").querySelectorAll("tbody tr[data-id]")) {
     const on = cur && tr.dataset.id === cur.line;
     if (on && !tr.classList.contains("current") && state.playing) tr.scrollIntoView({ block: "nearest" });
     tr.classList.toggle("current", !!on);
@@ -200,11 +297,19 @@ function updateClock() {
 }
 
 // ---------------------------------------------------------------- playback
-const waitSeek = (t) => new Promise((r) => {
-  if (Math.abs(video.currentTime - t) < 1e-3) return r();
+const waitSeek = (video, t) => new Promise((r) => {
+  if (Math.abs(video.currentTime - t) < 1e-3 && video.readyState >= 2) return r();
   video.addEventListener("seeked", r, { once: true });
   video.currentTime = t;
 });
+
+// 出力の時刻 → どの素材の何秒目か
+function locate(t) {
+  const { src, seg } = outToSrc(state.segs, t);
+  const s = state.segs[seg];
+  const c = state.clips[s.clip];
+  return { seg, clip: c, local: Math.min(src - c.offset, c.duration - 0.01) };
+}
 
 let seekToken = 0;
 async function seekTo(t) {
@@ -213,18 +318,20 @@ async function seekTo(t) {
   if (!state.segs.length) return;
   const my = ++seekToken;
   updateClock();
-  await waitSeek(outToSrc(state.segs, state.t).src);
+  const { clip, local } = locate(state.t);
+  await waitSeek(clip.video, local);
   if (my !== seekToken) return; // 連続シーク中は最後の1回だけ描く
-  renderer.draw(ctx, state.t, video, state.settings.layout);
+  renderer.draw(ctx, state.t, clip.video, state.settings.layout);
 }
 
-let sfxCtx, sfxNodes = [], segIdx = 0;
+let sfxCtx, sfxNodes = [], segIdx = 0, active = null;
 async function play() {
   const total = totalDuration(state.segs);
   if (state.t >= total - 0.05) state.t = 0;
-  const { src, seg } = outToSrc(state.segs, state.t);
+  const { seg, clip, local } = locate(state.t);
   segIdx = seg;
-  await waitSeek(src);
+  active = clip.video;
+  await waitSeek(active, local);
   state.playing = true;
   $("btnPlay").textContent = "❚❚";
   sfxCtx ||= new AudioContext();
@@ -238,29 +345,39 @@ async function play() {
     n.start(now + Math.max(0, e.t - state.t));
     sfxNodes.push(n);
   }
-  await video.play();
+  await active.play();
   requestAnimationFrame(tick);
 }
 
 function tick() {
   if (!state.playing) return;
-  const ct = video.currentTime;
   let s = state.segs[segIdx];
-  if (ct >= s.end - 0.02 || video.ended) {
+  let c = state.clips[s.clip];
+  const local = active.currentTime;
+  if (local >= s.end - c.offset - 0.02 || active.ended) {
     segIdx++;
     if (segIdx >= state.segs.length) { state.t = totalDuration(state.segs); stop(); updateClock(); return; }
     s = state.segs[segIdx];
-    video.currentTime = s.start; // 次の区間へジャンプ（ジャンプカット）
+    c = state.clips[s.clip];
+    if (c.video !== active) {
+      // 次の素材へ切り替え
+      active.pause();
+      active = c.video;
+      active.currentTime = s.start - c.offset;
+      active.play();
+    } else {
+      active.currentTime = s.start - c.offset; // 次の区間へジャンプ（ジャンプカット）
+    }
   }
-  state.t = s.out + Math.max(0, Math.min(video.currentTime, s.end) - s.start);
-  renderer.draw(ctx, state.t, video, state.settings.layout);
+  state.t = s.out + Math.max(0, Math.min(active.currentTime + c.offset, s.end) - s.start);
+  renderer.draw(ctx, state.t, active, state.settings.layout);
   updateClock();
   requestAnimationFrame(tick);
 }
 
 function stop() {
   state.playing = false;
-  video.pause();
+  for (const c of state.clips) c.video.pause();
   $("btnPlay").textContent = "▶";
   for (const n of sfxNodes) try { n.stop(); } catch { /* 再生済み */ }
   sfxNodes = [];
@@ -269,24 +386,33 @@ function stop() {
 // ---------------------------------------------------------------- export
 async function doExport() {
   stop();
+  if (state.clips.length > 1 && state.clips.some((c) => !c.media)) {
+    setStatus("expStatus", "複数の素材をつなぐときは、すべて MP4 か MOV にしてください。", true);
+    return;
+  }
   const btn = $("btnExport");
-  btn.disabled = true;
+  // 書き出し中に設定や字幕が変わると映像が崩れるので、操作をロックする
+  const locked = [btn, $("selAspect"), $("selLayout"), $("inpTitle"), $("inpGap"), $("btnAnalyze"), $("btnAddLine"), $("inpVideo"), $("btnPlay"), $("seek")];
+  locked.forEach((el) => (el.disabled = true));
+  document.body.classList.add("busy");
+  const suffix = state.settings.aspect === "landscape" ? "_telop_16x9.mp4" : "_telop.mp4";
   showProgress("expProgress", 0);
   try {
     setStatus("expStatus", "音声をミックス中…");
-    const audio = await mixAudio(state.audio, state.segs, renderer.sfxEvents(), sfxBuffers);
+    const audio = await mixAudio(state.clips, state.segs, renderer.sfxEvents(), sfxBuffers);
     setStatus("expStatus", "書き出し中…");
     const blob = await exportMp4({
-      media: state.media, video, segs: state.segs, renderer, layout: state.settings.layout, audio,
+      clips: state.clips, segs: state.segs, renderer, layout: state.settings.layout, audio,
       onProgress: (p) => { showProgress("expProgress", p); setStatus("expStatus", `書き出し中… ${Math.round(p * 100)}%`); },
     });
-    download(blob, state.file.name.replace(/\.[^.]+$/, "") + "_telop.mp4");
+    download(blob, baseName() + suffix);
     setStatus("expStatus", `完了（${(blob.size / 1e6).toFixed(1)}MB）。ダウンロードフォルダを確認してください。`);
   } catch (e) {
     console.error(e);
     setStatus("expStatus", `エラー：${e.message}`, true);
   } finally {
-    btn.disabled = false;
+    locked.forEach((el) => (el.disabled = false));
+    document.body.classList.remove("busy");
     $("expProgress").hidden = true;
     seekTo(state.t);
   }
@@ -300,10 +426,15 @@ function download(blob, name) {
 
 // ---------------------------------------------------------------- project save/load
 function projectData() {
-  return { version: 1, file: state.file && { name: state.file.name, size: state.file.size }, settings: state.settings, lines: state.lines };
+  return {
+    version: 2,
+    files: state.clips.map((c) => ({ name: c.file.name, size: c.file.size })),
+    settings: state.settings,
+    lines: state.lines,
+  };
 }
 function save() {
-  if (state.file) try { localStorage.setItem(projectKey(state.file), JSON.stringify(projectData())); } catch { /* 容量不足など */ }
+  if (state.clips.length) try { localStorage.setItem(projectKey(), JSON.stringify(projectData())); } catch { /* 容量不足など */ }
 }
 function applyProject(p) {
   state.settings = { ...state.settings, ...p.settings };
@@ -312,7 +443,8 @@ function applyProject(p) {
   $("selLayout").value = state.settings.layout;
   $("inpGap").value = state.settings.gap;
   $("gapVal").textContent = `${Number(state.settings.gap).toFixed(2)}秒`;
-  if (state.db) state.speech = detectSpeech(state.db, { gap: state.settings.gap });
+  applyFormat();
+  computeSpeech();
 }
 
 // ---------------------------------------------------------------- helpers
@@ -328,26 +460,31 @@ function showProgress(id, p) {
 }
 
 // ---------------------------------------------------------------- events
-$("inpVideo").onchange = (e) => e.target.files[0] && loadVideo(e.target.files[0]);
+$("inpVideo").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
 for (const el of [$("dropzone"), document.querySelector(".phone")]) {
   el.addEventListener("dragover", (e) => { e.preventDefault(); $("dropzone").classList.add("over"); });
   el.addEventListener("dragleave", () => $("dropzone").classList.remove("over"));
   el.addEventListener("drop", (e) => {
     e.preventDefault();
     $("dropzone").classList.remove("over");
-    const f = e.dataTransfer.files[0];
-    if (f && f.type.startsWith("video/")) loadVideo(f);
+    addFiles(e.dataTransfer.files);
   });
 }
 $("btnAnalyze").onclick = analyze;
 $("btnPlay").onclick = () => (state.playing ? stop() : play());
 $("seek").oninput = (e) => seekTo(Number(e.target.value));
+$("selAspect").onchange = async (e) => {
+  stop();
+  state.settings.aspect = e.target.value;
+  applyFormat();
+  await refresh(false);
+};
 $("selLayout").onchange = (e) => { state.settings.layout = e.target.value; refresh(false); };
 $("inpTitle").oninput = (e) => { state.settings.title = e.target.value; scheduleRefresh(); };
 $("inpGap").oninput = (e) => {
   state.settings.gap = Number(e.target.value);
   $("gapVal").textContent = `${state.settings.gap.toFixed(2)}秒`;
-  if (state.db) state.speech = detectSpeech(state.db, { gap: state.settings.gap });
+  computeSpeech();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => refresh(true), 200);
 };
@@ -359,16 +496,23 @@ $("btnAddLine").onclick = async () => {
   await refresh(true);
 };
 $("btnExport").onclick = doExport;
-$("btnSrt").onclick = () => download(new Blob([toSrt(state.items)], { type: "text/plain" }), state.file.name.replace(/\.[^.]+$/, "") + ".srt");
-$("btnSaveProject").onclick = () => download(new Blob([JSON.stringify(projectData(), null, 1)], { type: "application/json" }), state.file.name.replace(/\.[^.]+$/, "") + "_telop.json");
+$("btnSrt").onclick = () => download(new Blob([toSrt(state.items)], { type: "text/plain" }), baseName() + ".srt");
+$("btnSaveProject").onclick = () => download(new Blob([JSON.stringify(projectData(), null, 1)], { type: "application/json" }), baseName() + "_telop.json");
 $("inpProject").onchange = async (e) => {
   const f = e.target.files[0];
   if (!f) return;
-  applyProject(JSON.parse(await f.text()));
-  if (state.file) await refresh(true);
-  else setStatus("anaStatus", "作業を読み込みました。同じ動画を選んでください。");
+  const p = JSON.parse(await f.text());
+  if (state.clips.length) {
+    applyProject(p);
+    await refresh(true);
+  } else {
+    state.pendingProject = p;
+    const names = (p.files || (p.file ? [p.file] : [])).map((x) => x.name).join("、");
+    setStatus("anaStatus", `作業を読み込みました。同じ素材（${names}）を選んでください。`);
+  }
 };
 document.addEventListener("keydown", (e) => {
+  if (document.body.classList.contains("busy")) return;
   if (e.code === "Space" && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName) && state.segs.length) {
     e.preventDefault();
     state.playing ? stop() : play();
