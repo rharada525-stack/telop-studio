@@ -38,28 +38,176 @@ export async function openMedia(file) {
   const rotation = ((Math.round((Math.atan2(b, a) * 180) / Math.PI) % 360) + 360) % 360;
   const vsamples = vtrak.samples.map(slim);
 
+  // 音声: 音声トラックが複数ある（iPhone の空間オーディオなど）ときは、読める最初の1本を使う
+  const soundTraks = mp4.moov.traks.filter((t) => t.mdia.hdlr.handler === "soun" && t.samples && t.samples.length);
   let audio = null;
-  const at = info.audioTracks[0];
-  if (at) {
-    const atrak = mp4.getTrackById(at.id);
-    audio = {
-      config: {
-        codec: at.codec,
-        sampleRate: at.audio.sample_rate,
-        numberOfChannels: at.audio.channel_count,
-        description: esdsDescription(atrak),
-      },
-      samples: atrak.samples.map(slim),
-      duration: at.duration / at.timescale,
-    };
-    if (!(await AudioDecoder.isConfigSupported(audio.config)).supported) audio = null;
+  const unsupported = [];
+  for (const trak of soundTraks) {
+    const a = await describeAudio(file, trak);
+    if (a) { audio = a; break; }
+    unsupported.push(trak.mdia.minf.stbl.stsd.entries[0]?.type || "?");
   }
   return {
     file,
     duration: info.duration / info.timescale,
     video: { config: vconfig, rotation, samples: vsamples, keyframes: vsamples.filter((s) => s.sync) },
     audio,
+    audioError: audio ? null : soundTraks.length ? `音声の形式（${unsupported.join("・")}）に対応していません。` : "音声の入っていない動画です。",
   };
+}
+
+// ---------------------------------------------------------------- audio track description
+// QuickTime（iPhone の MOV など）は音声の設定が「wave」箱の中にあり mp4box が読めないので、stsd を自分で読む
+const PCM_TYPES = { sowt: 1, twos: 1, in24: 1, in32: 1, fl32: 1, fl64: 1, lpcm: 1, raw: 1, NONE: 1 };
+
+async function describeAudio(file, trak) {
+  const stsd = trak.mdia.minf.stbl.stsd;
+  const type = (stsd.entries[0]?.type || "").trim();
+  const bytes = new Uint8Array(await file.slice(stsd.start, stsd.start + stsd.size).arrayBuffer());
+  const sd = parseSoundDescription(bytes);
+  if (!sd) return null;
+  const sampleRate = sd.sampleRate || trak.mdia.mdhd.timescale;
+  const duration = trak.mdia.mdhd.duration / trak.mdia.mdhd.timescale;
+
+  if (PCM_TYPES[type] !== undefined) {
+    const pcm = pcmFormat(type, sd);
+    if (!pcm) return null;
+    // 非圧縮音声は1フレーム=1サンプルで数が多いので、ファイル上で連続している塊にまとめておく
+    const runs = [];
+    const bpf = pcm.bytes * sd.channels;
+    let frames = 0;
+    for (const s of trak.samples) {
+      const last = runs[runs.length - 1];
+      if (last && last.offset + last.size === s.offset && last.size < 4 << 20) last.size += s.size;
+      else runs.push({ offset: s.offset, size: s.size, frame: frames });
+      frames += s.size / bpf;
+    }
+    return { pcm, runs, channels: sd.channels, sampleRate, duration };
+  }
+
+  let config;
+  if (type === "mp4a") {
+    const esds = findBox(bytes, "esds", 16);
+    const dec = esds && parseEsds(bytes.subarray(esds.start + 12, esds.end));
+    if (dec && (dec.oti === 0x69 || dec.oti === 0x6b)) {
+      config = { codec: "mp3", sampleRate, numberOfChannels: sd.channels };
+    } else {
+      // AudioSpecificConfig が見つからなければ AAC-LC として作る（iPhone はほぼ AAC-LC）
+      const asc = dec?.asc?.length ? dec.asc : makeAacLcConfig(sampleRate, sd.channels);
+      let aot = asc[0] >> 3;
+      if (aot === 31) aot = 32 + (((asc[0] & 7) << 3) | (asc[1] >> 5));
+      config = { codec: `mp4a.40.${aot}`, sampleRate, numberOfChannels: sd.channels, description: asc };
+    }
+  } else if (type === "Opus" || type === "opus") {
+    config = { codec: "opus", sampleRate: 48000, numberOfChannels: sd.channels };
+  } else if (type === "fLaC") {
+    config = { codec: "flac", sampleRate, numberOfChannels: sd.channels };
+  } else {
+    return null; // alac・apac（空間オーディオ）など
+  }
+  if (!(await AudioDecoder.isConfigSupported(config)).supported) return null;
+  return { config, samples: trak.samples.map(slim), duration };
+}
+
+// stsd 箱（ヘッダー込み）から最初の音声サンプル記述を読む
+function parseSoundDescription(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const e = 16; // stsd ヘッダー(8) + version/flags(4) + entry_count(4)
+  if (b.length < e + 36) return null;
+  const version = dv.getUint16(e + 16);
+  const sd = {
+    version,
+    channels: dv.getUint16(e + 24),
+    sampleSize: dv.getUint16(e + 26),
+    sampleRate: dv.getUint32(e + 32) / 65536,
+    bytesPerFrame: 0,
+    flags: 0,
+  };
+  if (version === 1 && b.length >= e + 52) {
+    sd.bytesPerFrame = dv.getUint32(e + 44);
+  } else if (version === 2 && b.length >= e + 72) {
+    sd.sampleRate = dv.getFloat64(e + 40);
+    sd.channels = dv.getUint32(e + 48);
+    sd.sampleSize = dv.getUint32(e + 56);
+    sd.flags = dv.getUint32(e + 60);
+    sd.bytesPerFrame = dv.getUint32(e + 64);
+  }
+  sd.enda = (() => {
+    const box = findBox(b, "enda", e);
+    return box ? dv.getUint16(box.start + 8) === 1 : null;
+  })();
+  return sd;
+}
+
+function pcmFormat(type, sd) {
+  const le = sd.enda;
+  switch (type) {
+    case "sowt": return { bytes: 2, kind: "int", little: true };
+    case "twos": return sd.sampleSize === 8 ? { bytes: 1, kind: "int", little: true } : { bytes: 2, kind: "int", little: false };
+    case "in24": return { bytes: 3, kind: "int", little: le === true };
+    case "in32": return { bytes: 4, kind: "int", little: le === true };
+    case "fl32": return { bytes: 4, kind: "float", little: le === true };
+    case "fl64": return { bytes: 8, kind: "float", little: le === true };
+    case "raw": case "NONE": return { bytes: 1, kind: "uint", little: true };
+    case "lpcm": {
+      const bytes = Math.round(sd.sampleSize / 8) || (sd.bytesPerFrame && sd.bytesPerFrame / sd.channels);
+      if (!bytes) return null;
+      return { bytes, kind: sd.flags & 1 ? "float" : sd.flags & 4 ? "int" : "uint", little: !(sd.flags & 2) };
+    }
+    default: return null;
+  }
+}
+
+// バイト列の中から 4文字の箱を探す（wave 箱の中にあっても見つかる）
+function findBox(b, name, from = 0) {
+  const n = [...name].map((c) => c.charCodeAt(0));
+  for (let i = from + 4; i + 4 <= b.length; i++) {
+    if (b[i] === n[0] && b[i + 1] === n[1] && b[i + 2] === n[2] && b[i + 3] === n[3]) {
+      const size = (b[i - 4] << 24) | (b[i - 3] << 16) | (b[i - 2] << 8) | b[i - 1];
+      if (size >= 8 && i - 4 + size <= b.length) return { start: i - 4, end: i - 4 + size };
+    }
+  }
+  return null;
+}
+
+// esds の中身（記述子の並び）から DecoderConfig と AudioSpecificConfig を取り出す
+function parseEsds(d) {
+  let p = 0, oti = 0, asc = null;
+  const len = () => {
+    let n = 0;
+    for (let k = 0; k < 4; k++) {
+      const c = d[p++];
+      n = (n << 7) | (c & 0x7f);
+      if (!(c & 0x80)) break;
+    }
+    return n;
+  };
+  while (p < d.length) {
+    const tag = d[p++];
+    const n = len();
+    if (tag === 3) {
+      p += 2;
+      const f = d[p++];
+      if (f & 0x80) p += 2;
+      if (f & 0x40) p += 1 + d[p];
+      if (f & 0x20) p += 2;
+    } else if (tag === 4) {
+      oti = d[p];
+      p += 13;
+    } else if (tag === 5) {
+      asc = d.slice(p, p + n);
+      p += n;
+    } else {
+      p += n;
+    }
+  }
+  return { oti, asc };
+}
+
+function makeAacLcConfig(sampleRate, channels) {
+  const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+  const fi = Math.max(0, rates.indexOf(sampleRate));
+  return new Uint8Array([(2 << 3) | (fi >> 1), ((fi & 1) << 7) | (Math.min(channels, 7) << 3)]);
 }
 
 // 中身（data）は持たず、位置と時刻だけ覚えておく
@@ -77,12 +225,6 @@ function boxDescription(trak) {
     }
   }
   return undefined;
-}
-
-function esdsDescription(trak) {
-  const e = trak.mdia.minf.stbl.stsd.entries[0];
-  const d = e && e.esds && e.esds.esd && e.esds.esd.descs[0] && e.esds.esd.descs[0].descs[0];
-  return d && d.data ? new Uint8Array(d.data) : undefined;
 }
 
 // i 番目から、ファイル上で連続しているサンプルをまとめて読む（最大 maxBytes）
@@ -104,6 +246,7 @@ async function readRun(file, samples, i, maxBytes = 8 << 20, maxCount = 120) {
 // ---------------------------------------------------------------- audio
 // 音声トラックを少しずつデコードして AudioBuffer にする（映像部分は読まない）
 export async function decodeAudioTrack(media, onProgress) {
+  if (media.audio.pcm) return decodePcm(media, onProgress);
   const { config, samples, duration } = media.audio;
   const sr = config.sampleRate, nch = config.numberOfChannels;
   const length = Math.ceil((duration + 1) * sr);
@@ -114,7 +257,7 @@ export async function decodeAudioTrack(media, onProgress) {
       const start = Math.max(0, Math.round((ad.timestamp / 1e6) * sr));
       const n = Math.min(ad.numberOfFrames, length - start);
       if (n > 0) {
-        for (let c = 0; c < nch; c++) {
+        for (let c = 0; c < Math.min(nch, ad.numberOfChannels); c++) {
           const tmp = new Float32Array(ad.numberOfFrames);
           ad.copyTo(tmp, { planeIndex: c, format: "f32-planar" });
           chans[c].set(tmp.subarray(0, n), start);
@@ -143,6 +286,40 @@ export async function decodeAudioTrack(media, onProgress) {
   if (failure) throw failure;
   const buf = new AudioBuffer({ length: Math.max(1, maxEnd), numberOfChannels: nch, sampleRate: sr });
   chans.forEach((ch, c) => buf.copyToChannel(ch.subarray(0, buf.length), c));
+  return buf;
+}
+
+// 非圧縮（PCM）の音声：塊ごとに読んで、そのまま数値に直す
+async function decodePcm(media, onProgress) {
+  const { pcm, runs, channels: nch, sampleRate: sr } = media.audio;
+  const total = runs.reduce((a, r) => a + r.size, 0) / (pcm.bytes * nch);
+  const chans = Array.from({ length: nch }, () => new Float32Array(Math.max(1, Math.ceil(total))));
+  const scale = pcm.kind === "float" ? 1 : 2 ** (8 * pcm.bytes - 1);
+  let done = 0;
+  for (const r of runs) {
+    const bytes = new Uint8Array(await media.file.slice(r.offset, r.offset + r.size).arrayBuffer());
+    const dv = new DataView(bytes.buffer);
+    const frames = Math.floor(bytes.length / (pcm.bytes * nch));
+    for (let f = 0; f < frames; f++) {
+      for (let c = 0; c < nch; c++) {
+        const o = (f * nch + c) * pcm.bytes;
+        let v;
+        if (pcm.kind === "float") v = pcm.bytes === 4 ? dv.getFloat32(o, pcm.little) : dv.getFloat64(o, pcm.little);
+        else if (pcm.bytes === 1) v = pcm.kind === "uint" ? bytes[o] - 128 : dv.getInt8(o);
+        else if (pcm.bytes === 2) v = dv.getInt16(o, pcm.little);
+        else if (pcm.bytes === 3) {
+          const [x, y, z] = pcm.little ? [bytes[o + 2], bytes[o + 1], bytes[o]] : [bytes[o], bytes[o + 1], bytes[o + 2]];
+          v = ((x << 24) | (y << 16) | (z << 8)) >> 8;
+        } else v = dv.getInt32(o, pcm.little);
+        const i = r.frame + f;
+        if (i < chans[c].length) chans[c][i] = v / scale;
+      }
+    }
+    done += r.size;
+    onProgress?.(done / (total * pcm.bytes * nch));
+  }
+  const buf = new AudioBuffer({ length: chans[0].length, numberOfChannels: nch, sampleRate: sr });
+  chans.forEach((ch, c) => buf.copyToChannel(ch, c));
   return buf;
 }
 

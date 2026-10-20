@@ -88,7 +88,7 @@ async function loadClip(file, status) {
   status("読み込み中…");
   // MP4/MOV は必要な部分だけ少しずつ読む（数GBでもOK）
   const media = await openMedia(file);
-  if (media && !media.audio) throw new Error("音声の入っていない動画です。");
+  if (media && !media.audio) throw new Error(media.audioError);
   let audio;
   if (media) audio = await decodeAudioTrack(media, (p) => status(`音声を読み込み中… ${Math.round(p * 100)}%`));
   else if (file.size > 800e6) throw new Error("この形式の大きいファイルには対応していません。MP4 か MOV を使ってください。");
