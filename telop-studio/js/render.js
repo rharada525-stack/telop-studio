@@ -22,6 +22,8 @@ export class Renderer {
     this.raw = raw;
     this.cache = new Map(); // テロップの見た目が同じなら再利用（編集中も軽い）
     this.items = [];
+    this.screens = [];
+    this.overrides = () => ({});
     this.setFormat("portrait");
   }
 
@@ -29,23 +31,57 @@ export class Renderer {
     if (this.aspect === aspect) return;
     this.aspect = aspect;
     ({ W: this.W, H: this.H } = FORMATS[aspect]);
-    this.styles = stylesFor(this.base, this.raw, aspect);
-    this.cache.clear();
+    this.restyle();
     const sw = Math.round(this.W / 20), sh = Math.round(this.H / 20);
     this.small = Object.assign(document.createElement("canvas"), { width: sw, height: sh });
+  }
+
+  // 字幕デザインなど、画面で変えたスタイルを上書きする（aspect => { subtitle: {...} }）
+  setOverrides(fn) {
+    this.overrides = fn;
+    this.restyle();
+  }
+
+  restyle() {
+    this.styles = { ...stylesFor(this.base, this.raw, this.aspect), ...this.overrides(this.aspect) };
+    this.cache.clear();
   }
 
   async setItems(items) {
     const used = new Set();
     const built = [];
+    this.screens = items.filter((it) => it.style === "__screen");
     for (const it of items) {
-      const key = JSON.stringify([it.style, it.text || "", it.label || "", it.pos || ""]);
+      if (it.style === "__screen") continue;
+      const key = JSON.stringify([it.style, it.text || "", it.label || "", it.pos || "", it.align || ""]);
       used.add(key);
       if (!this.cache.has(key)) this.cache.set(key, await makeItem(it, this.styles, this.W, this.H, FPS));
       built.push({ ...it, obj: this.cache.get(key), z: this.styles[it.style].z ?? 5 });
     }
     for (const k of [...this.cache.keys()]) if (!used.has(k)) this.cache.delete(k);
     this.items = built.sort((a, b) => a.z - b.z || a.t - b.t);
+  }
+
+  // 画面効果（ズーム・モノクロ・暗く・揺れ）の時刻 t での強さ
+  screenState(t) {
+    const s = { zoom: 1, gray: 0, dark: 0, dx: 0, dy: 0 };
+    for (const e of this.screens) {
+      const u = t - e.t;
+      if (u < 0 || u >= e.d) continue;
+      const env = Math.min(Math.min(1, u / 0.12), Math.min(1, (e.d - u) / 0.2));
+      if (e.effect === "zoom") {
+        const pin = 1 - (1 - Math.min(1, u / 0.1)) ** 3; // パッと寄る
+        const out = Math.min(1, (e.d - u) / 0.2);
+        s.zoom = Math.max(s.zoom, 1 + 0.18 * pin * out);
+      } else if (e.effect === "mono") s.gray = Math.max(s.gray, env);
+      else if (e.effect === "dark") s.dark = Math.max(s.dark, env);
+      else if (e.effect === "shake") {
+        const amp = 18 * Math.max(0, 1 - u / 0.6);
+        s.dx += amp * Math.sin(u * 83);
+        s.dy += amp * Math.cos(u * 61);
+      }
+    }
+    return s;
   }
 
   // src: <video>（回転は適用済み）または VideoFrame（rotation を自分で適用）
@@ -86,7 +122,37 @@ export class Renderer {
   }
 
   draw(ctx, t, src, layout, rotation = 0) {
+    const { W, H } = this;
+    const fx = this.screenState(t);
+    ctx.save();
+    if (fx.zoom !== 1 || fx.dx || fx.dy) {
+      // 顔のあたり（少し上）を中心に寄る
+      const cx = W / 2, cy = H * 0.42;
+      ctx.translate(cx + fx.dx, cy + fx.dy);
+      ctx.scale(fx.zoom, fx.zoom);
+      ctx.translate(-cx, -cy);
+    }
     this.drawVideo(ctx, src, layout, rotation);
+    ctx.restore();
+    if (fx.gray > 0) {
+      // 彩度をゼロに（モノクロ）
+      ctx.save();
+      ctx.globalCompositeOperation = "saturation";
+      ctx.globalAlpha = fx.gray;
+      ctx.fillStyle = "#808080";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+    if (fx.dark > 0) {
+      // 周りを暗く（ネガティブな雰囲気）
+      ctx.save();
+      const g = ctx.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.25, W / 2, H * 0.45, Math.hypot(W, H) * 0.6);
+      g.addColorStop(0, `rgba(0,0,0,${0.25 * fx.dark})`);
+      g.addColorStop(1, `rgba(0,0,0,${0.85 * fx.dark})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
     for (const it of this.items) if (t >= it.t && t < it.t + it.d) it.obj.draw(ctx, t - it.t, it.d);
   }
 

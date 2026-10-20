@@ -6,8 +6,10 @@ const WEBFONTS = {
   "NotoSansJP-Black.otf": { family: "Noto Sans JP", weight: 900 },
   "GenEiNuGothic-EB.ttf": { family: "M PLUS Rounded 1c", weight: 800 },
 };
-const fontCss = (name, size) => {
-  const f = WEBFONTS[name] || { family: "sans-serif", weight: 900 };
+// st.family（フォント名を直接指定。PCに入っているフォントも可）があればそれを優先する
+const fontCss = (st, size) => {
+  if (st.family) return `${st.weight ?? 900} ${size}px "${st.family}", "Noto Sans JP", sans-serif`;
+  const f = WEBFONTS[st.font] || { family: "Noto Sans JP", weight: 900 };
   return `${f.weight} ${size}px "${f.family}"`;
 };
 
@@ -127,7 +129,7 @@ export class Block {
     const lines = parseMarkup(text);
     const trkEm = st.tracking || 0;
     const lineW = (line, size) => {
-      measureCtx.font = fontCss(st.font, size);
+      measureCtx.font = fontCss(st, size);
       return line.reduce((a, [c]) => a + measureCtx.measureText(c).width, 0) + trkEm * size * Math.max(0, line.length - 1);
     };
     if (st.max_width) {
@@ -135,7 +137,7 @@ export class Block {
       if (w > st.max_width) size = Math.floor((size * st.max_width) / w);
     }
     this.size = size;
-    const font = fontCss(st.font, size);
+    const font = fontCss(st, size);
     const lh = size * (st.line_spacing || 1.15);
     const strokes = st.strokes || [];
     const shadows = st.shadows || [];
@@ -297,6 +299,8 @@ export function blockState(st, t, d) {
     const p = clamp(t / 0.35);
     dx = -(1 - easeOutExpo(p)) * 900;
     op = clamp(p * 3);
+  } else if (k === "fade") {
+    op = clamp(t / 0.2);
   } else if (k === "fade_up") {
     const p = clamp(t / 0.25);
     dy = (1 - easeOutCubic(p)) * 40;
@@ -338,6 +342,8 @@ class TextItem {
     this.pos = pos;
     this.block = new Block(st, text);
   }
+  width() { return this.block.contentW; }
+  shift(dx) { this.pos[0] += dx; }
   draw(ctx, t, d) {
     drawBlock(ctx, this.block.compose(t), this.pos[0], this.pos[1], blockState(this.st, t, d), this.st.rotate);
   }
@@ -352,7 +358,10 @@ class GroupItem {
     const total = this.label.contentW + (st.gap || 0) + this.body.contentW;
     this.labelX = pos[0] - total / 2 + this.label.contentW / 2;
     this.bodyX = pos[0] + total / 2 - this.body.contentW / 2;
+    this.total = total;
   }
+  width() { return this.total; }
+  shift(dx) { this.labelX += dx; this.bodyX += dx; }
   draw(ctx, t, d) {
     const bd = this.st.body_delay || 0;
     for (const [blk, x, t0] of [[this.body, this.bodyX, bd], [this.label, this.labelX, 0]]) {
@@ -424,10 +433,16 @@ export async function makeItem(it, styles, W, H, fps) {
   const st = styles[it.style];
   if (st.effect === "speedlines") return new SpeedLines(st, W, H, fps);
   if (st.effect === "flash") return new Flash(st, W, H);
-  const fonts = st.group ? [styles[st.label_style].font, styles[st.body_style].font] : [st.font];
+  const fonts = st.group ? [styles[st.label_style], styles[st.body_style]] : [st];
   const chars = (it.label || "") + it.text;
-  await Promise.all(fonts.map((f) => document.fonts.load(fontCss(f, 100), chars)));
-  const pos = it.pos || st.pos || [W / 2, H / 2];
-  if (st.group) return new GroupItem(st, styles, it.label || "", it.text, pos);
-  return new TextItem(st, it.text, pos);
+  await Promise.all(fonts.map((f) => document.fonts.load(fontCss(f, 100), chars).catch(() => {})));
+  const pos = [...(it.pos || st.pos || [W / 2, H / 2])];
+  const item = st.group ? new GroupItem(st, styles, it.label || "", it.text, pos) : new TextItem(st, it.text, pos);
+  // 左上・右上に置くときは、テロップの端を指定位置にそろえる
+  if (it.align === "left" || it.align === "right") {
+    const w = item.width();
+    const dx = it.align === "left" ? w / 2 : -w / 2;
+    item.shift(dx);
+  }
+  return item;
 }

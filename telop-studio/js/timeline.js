@@ -226,20 +226,70 @@ export function outToSrc(segs, t) {
 }
 
 // ---------------------------------------------------------------- telop items
+// 演出テロップ。pos/screen は「おまかせ」のときの初期値（横長は人と重ならない位置にする）
 export const FX = {
   "": { name: "なし" },
-  keyword: { name: "キーワード", style: "keyword" },
-  hook: { name: "煽り（集中線）", style: "hook", extra: [{ style: "speedlines", d: 1.6 }] },
-  tsukkomi: { name: "ツッコミ（青）", style: "tsukkomi" },
-  tsukkomi_green: { name: "ツッコミ（緑）", style: "tsukkomi_green" },
-  point: { name: "見出し「その1/本文」", style: "point" },
-  reveal: { name: "オチ（フラッシュ）", style: "reveal", extra: [{ style: "flash", d: 0.4 }, { style: "speedlines_white", d: 1.3 }] },
-  cta_main: { name: "締め", style: "cta_main" },
+  keyword: { name: "キーワード", style: "keyword", pos: { portrait: "auto", landscape: "bottom" }, screen: "none" },
+  hook: { name: "煽り", style: "hook", pos: { portrait: "auto", landscape: "bottom" }, screen: "lines" },
+  tsukkomi: { name: "ツッコミ（青）", style: "tsukkomi", pos: { portrait: "auto", landscape: "tr" }, screen: "none" },
+  tsukkomi_green: { name: "ツッコミ（緑）", style: "tsukkomi_green", pos: { portrait: "auto", landscape: "tl" }, screen: "none" },
+  point: { name: "見出し「その1/本文」", style: "point", pos: { portrait: "auto", landscape: "tl" }, screen: "none" },
+  reveal: { name: "オチ", style: "reveal", pos: { portrait: "auto", landscape: "center" }, screen: "flash" },
+  cta_main: { name: "締め", style: "cta_main", pos: { portrait: "auto", landscape: "bottom" }, screen: "none" },
 };
+
+export const FX_POS = {
+  auto: "おまかせ", tl: "左上", top: "上", tr: "右上", center: "真ん中", bottom: "下（字幕の位置）",
+};
+
+export const SCREEN = {
+  auto: "おまかせ",
+  none: "なし",
+  zoom: "ズーム",
+  zoom_lines: "ズーム＋集中線",
+  lines: "集中線",
+  flash: "フラッシュ＋集中線",
+  mono_dark: "モノクロ＋暗く",
+  dark: "周りを暗く",
+  mono: "モノクロ",
+  shake: "揺れ",
+};
+
+// 位置の名前 → 座標と揃え方
+const PLACES = {
+  portrait: { tl: [60, 560, "left"], top: [540, 560], tr: [1020, 560, "right"], center: [540, 900], bottom: [540, 1180] },
+  landscape: { tl: [70, 215, "left"], top: [960, 200], tr: [1850, 215, "right"], center: [960, 520], bottom: [960, 800] },
+};
+
+function placeFor(key, aspect, replacesSubtitle, subtitlePos) {
+  if (!key || key === "auto") return {};
+  if (key === "bottom" && replacesSubtitle) return { pos: [...subtitlePos] };
+  const p = PLACES[aspect][key];
+  return p ? { pos: [p[0], p[1]], align: p[2] } : {};
+}
+
+// 画面効果 → 描画するもの
+function screenItems(effect, t, d) {
+  const lines = (style = "speedlines", dd = Math.min(d, 1.6)) => ({ style, t, d: dd });
+  const scr = (e) => ({ style: "__screen", effect: e, t, d });
+  switch (effect) {
+    case "zoom": return [scr("zoom")];
+    case "zoom_lines": return [scr("zoom"), lines()];
+    case "lines": return [lines()];
+    case "flash": return [{ style: "flash", t, d: 0.4 }, lines("speedlines_white", 1.3)];
+    case "mono_dark": return [scr("mono"), scr("dark")];
+    case "dark": return [scr("dark")];
+    case "mono": return [scr("mono")];
+    case "shake": return [scr("shake")];
+    default: return [];
+  }
+}
 
 // 字幕行 → 描画用テロップ一覧（出力側の時刻）
 export function buildItems(lines, segs, settings) {
   const total = totalDuration(segs);
+  const aspect = settings.aspect || "portrait";
+  const design = settings.design;
   const live = lines.filter((l) => !l.cut).map((l) => ({ l, t0: srcToOut(segs, l.src[0]), t1: srcToOut(segs, l.src[1]) }));
   const items = [];
   if (settings.title) items.push({ style: "header", text: settings.title, t: 0.2, d: Math.max(1, total - 0.2) });
@@ -249,24 +299,32 @@ export function buildItems(lines, segs, settings) {
     if (next && next.t0 - t1 < 0.6) end = next.t0; // 間が短ければ次の字幕までつなぐ
     end = Math.max(end, t0 + 0.5);
     const fx = FX[l.fx];
-    const ownText = l.fxText.trim();
-    const wrapAt = settings.aspect === "landscape" ? 26 : 13;
-    if (!(fx && fx.style && !ownText)) items.push({ style: "subtitle", text: wrapLine(l.text, wrapAt), t: t0, d: end - t0, line: l.id });
-    if (!fx || !fx.style) return;
-    const text = ownText || l.text;
+    const ownText = (l.fxText || "").trim();
+    const replaces = !!(fx && fx.style && !ownText); // 字幕そのものを演出テロップにする
+    const wrapAt = design?.maxChars?.[aspect] || (aspect === "landscape" ? 26 : 13);
+    if (!replaces) items.push({ style: "subtitle", text: wrapLine(l.text, wrapAt), t: t0, d: end - t0, line: l.id });
+
     let d = Math.max(1.4, end - t0);
-    if (l.fx === "reveal") d += 0.8;
-    if (l.fx === "point") {
-      const nextPoint = live.slice(i + 1).find((x) => x.l.fx === "point");
-      d = (nextPoint ? nextPoint.t0 : total) - t0;
+    if (fx && fx.style) {
+      const text = ownText || l.text;
+      if (l.fx === "reveal") d += 0.8;
+      if (l.fx === "point") {
+        const nextPoint = live.slice(i + 1).find((x) => x.l.fx === "point");
+        d = (nextPoint ? nextPoint.t0 : total) - t0;
+      }
+      const it = { style: fx.style, text, t: t0, d, line: l.id };
+      if (l.fx === "point") {
+        const [label, ...body] = text.split(/[/／]/);
+        Object.assign(it, body.length ? { label, text: body.join("/") } : { label: "POINT", text });
+      }
+      const posKey = !l.fxPos || l.fxPos === "auto" ? fx.pos?.[aspect] : l.fxPos;
+      Object.assign(it, placeFor(posKey, aspect, replaces, design?.pos?.[aspect] || [0, 0]));
+      items.push(it);
     }
-    const it = { style: fx.style, text, t: t0, d, line: l.id };
-    if (l.fx === "point") {
-      const [label, ...body] = text.split(/[/／]/);
-      Object.assign(it, body.length ? { label, text: body.join("/") } : { label: "POINT", text });
-    }
-    for (const ex of fx.extra || []) items.push({ style: ex.style, t: t0, d: ex.d });
-    items.push(it);
+    // 画面効果（演出なしの行にも付けられる）
+    const effect = !l.screen || l.screen === "auto" ? fx?.screen || "none" : l.screen;
+    const effDur = fx && fx.style && l.fx !== "point" ? d : end - t0;
+    items.push(...screenItems(effect, t0, effDur));
   });
   return items.map((it) => ({ ...it, d: Math.min(it.d, total - it.t) })).filter((it) => it.d > 0.05);
 }

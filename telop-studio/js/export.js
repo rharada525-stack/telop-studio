@@ -7,9 +7,16 @@ import { FrameReader } from "./decode.js";
 const SR = 48000;
 
 // カット済みの音声（複数素材）+ 効果音をミックス
-export async function mixAudio(clips, segs, sfxEvents, sfxBuffers) {
+export async function mixAudio(clips, segs, sfxEvents, sfxBuffers, gains = { voice: 1, sfx: 1 }) {
   const total = totalDuration(segs);
   const off = new OfflineAudioContext(2, Math.ceil(total * SR), SR);
+  // 最後にリミッターを通して、音割れしないようにする
+  const limiter = new DynamicsCompressorNode(off, { threshold: -3, knee: 0, ratio: 20, attack: 0.002, release: 0.1 });
+  limiter.connect(off.destination);
+  const voiceBus = new GainNode(off, { gain: gains.voice });
+  const sfxBus = new GainNode(off, { gain: gains.sfx });
+  voiceBus.connect(limiter);
+  sfxBus.connect(limiter);
   const fade = 0.006;
   for (const s of segs) {
     const c = clips[s.clip];
@@ -21,7 +28,7 @@ export async function mixAudio(clips, segs, sfxEvents, sfxBuffers) {
     g.gain.linearRampToValueAtTime(1, s.out + fade);
     g.gain.setValueAtTime(1, s.out + len - fade);
     g.gain.linearRampToValueAtTime(0, s.out + len);
-    src.connect(g).connect(off.destination);
+    src.connect(g).connect(voiceBus);
     src.start(s.out, s.start - c.offset, len);
   }
   for (const e of sfxEvents) {
@@ -29,7 +36,7 @@ export async function mixAudio(clips, segs, sfxEvents, sfxBuffers) {
     if (!b || e.t >= total) continue;
     const src = off.createBufferSource();
     src.buffer = b;
-    src.connect(off.destination);
+    src.connect(sfxBus);
     src.start(Math.max(0, e.t));
   }
   return off.startRendering();

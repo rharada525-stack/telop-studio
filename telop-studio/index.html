@@ -6,7 +6,7 @@
 <title>テロップスタジオ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=M+PLUS+Rounded+1c:wght@800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Zen+Maru+Gothic:wght@500;700;900&family=Dela+Gothic+One&family=Kosugi+Maru&family=BIZ+UDPGothic:wght@400;700&family=Noto+Serif+JP:wght@700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -83,18 +83,42 @@
 
     <div class="card grow" id="step3">
       <h2><span class="num">3</span>テロップを直す</h2>
-      <p class="hint">文字は直接書き換えられます。<b>{ }</b> で囲むと強調色。演出を選んで「演出の文字」を空のままにすると、その字幕自体が演出テロップになります。「カット」にチェックすると、その部分の映像ごと削除します。</p>
+      <p class="hint">文字は直接書き換えられます。<b>{ }</b> で囲むと強調色。演出を選んで文字を空のままにすると、その字幕自体が演出テロップになります。「画面効果」は演出なしの行にも付けられます。「カット」にチェックすると、その部分の映像ごと削除します。</p>
       <div class="table-wrap">
         <table id="lines">
-          <thead><tr><th>時間</th><th>字幕</th><th>演出</th><th>演出の文字</th><th>カット</th></tr></thead>
+          <thead><tr><th>時間</th><th>字幕</th><th>演出（種類・文字・位置）</th><th>画面効果</th><th>カット</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
       <button id="btnAddLine" class="ghost small" disabled>＋ 今の位置に字幕を追加</button>
     </div>
 
+    <details class="card" id="stepDesign">
+      <summary><h2><span class="num">4</span>字幕のデザイン</h2><span class="hint">クリックで開く</span></summary>
+      <p class="hint">Premiere のエッセンシャルグラフィックスと同じ考え方で、数値で指定できます。マニュアルの指定に合わせて入力し、「デザインを保存」したファイルを配れば、全員が同じデザインで作れます。</p>
+      <div id="designPanel" class="design-panel"></div>
+      <div class="row design-actions">
+        <button id="btnDesignSave" class="ghost small" type="button">デザインを保存</button>
+        <label class="ghost button small">デザインを読み込む<input id="inpDesign" type="file" accept=".json" hidden></label>
+        <button id="btnDesignDefault" class="ghost small" type="button">新しい作業の標準にする</button>
+        <button id="btnDesignReset" class="ghost small" type="button">初期設定に戻す</button>
+      </div>
+      <p class="status" id="designStatus"></p>
+    </details>
+
+    <div class="card" id="stepAudio">
+      <h2><span class="num">5</span>音のバランス</h2>
+      <label class="check"><input id="chkVoiceAuto" type="checkbox" checked> 声の大きさを自動でそろえる（小さい声も聞きやすく）</label>
+      <label class="slider">声の音量 <span id="voiceVal" class="mono">100%</span>
+        <input id="inpVoice" type="range" min="0" max="200" step="5" value="100">
+      </label>
+      <label class="slider">効果音の音量 <span id="sfxVal" class="mono">40%</span>
+        <input id="inpSfx" type="range" min="0" max="100" step="5" value="40">
+      </label>
+    </div>
+
     <div class="card" id="step4">
-      <h2><span class="num">4</span>書き出す</h2>
+      <h2><span class="num">6</span>書き出す</h2>
       <div class="row">
         <button id="btnExport" class="primary" disabled>MP4 を書き出す</button>
         <button id="btnSrt" class="ghost" disabled>字幕ファイル（SRT）</button>

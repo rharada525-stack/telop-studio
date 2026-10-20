@@ -2,10 +2,11 @@ import { resolveStyles } from "./telop.js";
 import { Renderer } from "./render.js";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
-  totalDuration, srcToOut, outToSrc, toSrt, FX, FRAME, layoutClips, splitAtClips, clipAt,
+  totalDuration, srcToOut, outToSrc, toSrt, FX, FX_POS, SCREEN, FRAME, layoutClips, splitAtClips, clipAt,
 } from "./timeline.js";
 import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
+import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -19,11 +20,21 @@ const state = {
   speech: [],
   lines: [],
   segs: [],
-  settings: { title: "", layout: "auto", gap: 0.3, aspect: "portrait" },
+  settings: {
+    title: "", layout: "auto", gap: 0.3, aspect: "portrait",
+    design: loadDefaultDesign(),                       // 字幕のデザイン
+    audio: { voiceAuto: true, voice: 100, sfx: 40 },  // 音量（%）
+  },
+  voiceAutoGain: 1, // 声を聞きやすい大きさにそろえる倍率（素材から計算）
   t: 0,             // 出力側の再生位置（秒）
   playing: false,
 };
-let renderer, sfxBuffers = {};
+let renderer, sfxBuffers = {}, refreshDesignPanel = () => {};
+
+const DESIGN_KEY = "telop-studio:defaultDesign";
+function loadDefaultDesign() {
+  try { return normalizeDesign(JSON.parse(localStorage.getItem(DESIGN_KEY))); } catch { return structuredClone(DEFAULT_DESIGN); }
+}
 
 const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 const projectKey = () => "telop-studio:" + state.clips.map((c) => `${c.file.name}:${c.file.size}`).join("|");
@@ -36,6 +47,12 @@ async function init() {
   const raw = await (await fetch("styles.json")).json();
   const styles = resolveStyles(raw);
   renderer = new Renderer(styles, raw);
+  renderer.setOverrides((aspect) => ({ subtitle: designToStyle(state.settings.design, aspect) }));
+  refreshDesignPanel = buildDesignPanel($("designPanel"), {
+    getDesign: () => state.settings.design,
+    getAspect: () => state.settings.aspect,
+    onChange: () => designChanged(),
+  });
   const ac = new AudioContext();
   const names = [...new Set(Object.values(styles).map((s) => s.sfx).filter(Boolean)), "drumroll"];
   await Promise.all(names.map(async (n) => {
@@ -44,18 +61,41 @@ async function init() {
   ac.close();
   await document.fonts.load('900 40px "Noto Sans JP"', "テロップ");
   applyFormat();
+  syncAudioUi();
+}
+
+// 字幕デザインが変わったら作り直して再描画（連続入力はまとめる）
+let designTimer;
+function designChanged() {
+  clearTimeout(designTimer);
+  designTimer = setTimeout(async () => {
+    renderer.restyle();
+    if (state.clips.length) await refresh(false);
+    else drawDesignSample();
+  }, 150);
+}
+
+// 素材がないときもデザインを確認できるように見本を描く
+async function drawDesignSample() {
+  if (state.clips.length) return;
+  await renderer.setItems([{ style: "subtitle", text: "字幕のデザイン見本\n{強調}はこの色になります", t: 0, d: 10 }]);
+  ctx.fillStyle = "#3a4250";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (const it of renderer.items) it.obj.draw(ctx, 5, 10);
 }
 
 // 縦 9:16 / 横 16:9 の切り替え
 function applyFormat() {
   const a = state.settings.aspect;
   renderer.setFormat(a);
+  refreshDesignPanel();
   canvas.width = renderer.W;
   canvas.height = renderer.H;
   document.body.classList.toggle("landscape", a === "landscape");
   $("selAspect").value = a;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawDesignSample();
 }
 
 // ---------------------------------------------------------------- step 1: clips
@@ -143,6 +183,7 @@ async function clipsChanged(fromAdd) {
 
 function computeSpeech() {
   if (state.db) state.speech = splitAtClips(detectSpeech(state.db, { gap: state.settings.gap }), state.clips);
+  computeVoiceGain();
 }
 
 function renderClipList() {
@@ -242,7 +283,8 @@ async function refresh(rebuildTable) {
 function renderTable() {
   const tb = $("lines").querySelector("tbody");
   tb.innerHTML = "";
-  const opts = Object.entries(FX).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+  const toOpts = (o) => Object.entries(o).map(([k, v]) => `<option value="${k}">${typeof v === "string" ? v : v.name}</option>`).join("");
+  const opts = toOpts(FX), posOpts = toOpts(FX_POS), scrOpts = toOpts(SCREEN);
   const multi = state.clips.length > 1;
   let lastClip = -1;
   for (const l of state.lines) {
@@ -251,7 +293,7 @@ function renderTable() {
       // 素材の切れ目に見出し行を入れる
       const sep = document.createElement("tr");
       sep.className = "clip-sep";
-      sep.innerHTML = `<td colspan="5"></td>`;
+      sep.innerHTML = `<td colspan="5"></td>`; // 列数: 時間・字幕・演出・画面効果・カット
       sep.firstChild.textContent = `素材 ${ci + 1}：${state.clips[ci].file.name}`;
       tb.appendChild(sep);
       lastClip = ci;
@@ -260,19 +302,31 @@ function renderTable() {
     tr.dataset.id = l.id;
     tr.innerHTML = `<td class="time"><button class="mono"></button></td>
       <td><textarea rows="2"></textarea></td>
-      <td><select>${opts}</select></td>
-      <td><input type="text" placeholder="空なら字幕と同じ"></td>
+      <td class="fx"><select class="fx-type">${opts}</select><input type="text" placeholder="空なら字幕と同じ">
+        <label class="fx-pos">位置 <select>${posOpts}</select></label></td>
+      <td class="scr"><select>${scrOpts}</select></td>
       <td class="cut"><input type="checkbox"></td>`;
-    const [bt, ta, sel, inp, cb] = tr.querySelectorAll("button, textarea, select, input[type=text], input[type=checkbox]");
+    const bt = tr.querySelector(".time button"), ta = tr.querySelector("textarea");
+    const sel = tr.querySelector(".fx-type"), inp = tr.querySelector(".fx input[type=text]");
+    const pos = tr.querySelector(".fx-pos select"), scr = tr.querySelector(".scr select"), cb = tr.querySelector(".cut input");
     bt.textContent = fmt(srcToOut(state.segs, l.src[0]));
     bt.onclick = () => seekTo(srcToOut(state.segs, l.src[0]) + 0.01);
     ta.value = l.text;
     ta.oninput = () => { l.text = ta.value; scheduleRefresh(); };
+    const syncFx = () => {
+      const on = !!FX[l.fx]?.style;
+      inp.hidden = pos.parentElement.hidden = !on;
+      inp.placeholder = l.fx === "point" ? "その1/本文" : "空なら字幕と同じ";
+    };
     sel.value = l.fx;
-    sel.onchange = () => { l.fx = sel.value; inp.placeholder = l.fx === "point" ? "その1/本文" : "空なら字幕と同じ"; scheduleRefresh(); };
+    sel.onchange = () => { l.fx = sel.value; syncFx(); scheduleRefresh(); };
     inp.value = l.fxText;
-    inp.placeholder = l.fx === "point" ? "その1/本文" : "空なら字幕と同じ";
     inp.oninput = () => { l.fxText = inp.value; scheduleRefresh(); };
+    pos.value = l.fxPos || "auto";
+    pos.onchange = () => { l.fxPos = pos.value; scheduleRefresh(); };
+    scr.value = l.screen || "auto";
+    scr.onchange = () => { l.screen = scr.value; scheduleRefresh(); };
+    syncFx();
     cb.checked = l.cut;
     tr.classList.toggle("is-cut", l.cut);
     cb.onchange = async () => { l.cut = cb.checked; await refresh(true); };
@@ -324,7 +378,41 @@ async function seekTo(t) {
   renderer.draw(ctx, state.t, clip.video, state.settings.layout);
 }
 
-let sfxCtx, sfxNodes = [], segIdx = 0, active = null;
+// 音量（倍率）。声は「自動でそろえる」の倍率 × スライダー
+function gains() {
+  const a = state.settings.audio;
+  return { voice: (a.voiceAuto ? state.voiceAutoGain : 1) * (a.voice / 100), sfx: a.sfx / 100 };
+}
+
+// しゃべっている部分の平均音量から、聞きやすい大きさ（-20dBFS 前後）にそろえる倍率を出す
+function computeVoiceGain() {
+  if (!state.pcm || !state.speech.length) { state.voiceAutoGain = 1; return; }
+  let sum = 0, n = 0;
+  for (const s of state.speech) {
+    for (let i = Math.floor(s.start * 16000); i < Math.min(state.pcm.length, s.end * 16000); i += 4) { sum += state.pcm[i] ** 2; n++; }
+  }
+  const db = 10 * Math.log10(sum / Math.max(1, n) + 1e-12);
+  state.voiceAutoGain = Math.min(6, Math.max(0.4, 10 ** ((-20 - db) / 20)));
+}
+
+let sfxCtx, sfxNodes = [], segIdx = 0, active = null, voiceBus, sfxBus;
+function audioGraph() {
+  sfxCtx ||= new AudioContext();
+  if (!voiceBus) {
+    // プレビューも書き出しと同じ音量バランスで聞けるように、声と効果音を別々の音量つまみに通す
+    const limiter = new DynamicsCompressorNode(sfxCtx, { threshold: -3, knee: 0, ratio: 20, attack: 0.002, release: 0.1 });
+    limiter.connect(sfxCtx.destination);
+    voiceBus = new GainNode(sfxCtx);
+    sfxBus = new GainNode(sfxCtx);
+    voiceBus.connect(limiter);
+    sfxBus.connect(limiter);
+  }
+  for (const c of state.clips) if (!c.srcNode) { c.srcNode = sfxCtx.createMediaElementSource(c.video); c.srcNode.connect(voiceBus); }
+  const g = gains();
+  voiceBus.gain.value = g.voice;
+  sfxBus.gain.value = g.sfx;
+}
+
 async function play() {
   const total = totalDuration(state.segs);
   if (state.t >= total - 0.05) state.t = 0;
@@ -334,14 +422,15 @@ async function play() {
   await waitSeek(active, local);
   state.playing = true;
   $("btnPlay").textContent = "❚❚";
-  sfxCtx ||= new AudioContext();
+  audioGraph();
+  await sfxCtx.resume();
   const now = sfxCtx.currentTime + 0.05;
   for (const e of renderer.sfxEvents()) {
     const b = sfxBuffers[e.name];
     if (!b || e.t < state.t - 0.05) continue;
     const n = sfxCtx.createBufferSource();
     n.buffer = b;
-    n.connect(sfxCtx.destination);
+    n.connect(sfxBus);
     n.start(now + Math.max(0, e.t - state.t));
     sfxNodes.push(n);
   }
@@ -399,7 +488,7 @@ async function doExport() {
   showProgress("expProgress", 0);
   try {
     setStatus("expStatus", "音声をミックス中…");
-    const audio = await mixAudio(state.clips, state.segs, renderer.sfxEvents(), sfxBuffers);
+    const audio = await mixAudio(state.clips, state.segs, renderer.sfxEvents(), sfxBuffers, gains());
     setStatus("expStatus", "書き出し中…");
     const blob = await exportMp4({
       clips: state.clips, segs: state.segs, renderer, layout: state.settings.layout, audio,
@@ -437,14 +526,32 @@ function save() {
   if (state.clips.length) try { localStorage.setItem(projectKey(), JSON.stringify(projectData())); } catch { /* 容量不足など */ }
 }
 function applyProject(p) {
-  state.settings = { ...state.settings, ...p.settings };
+  const s = p.settings || {};
+  state.settings = {
+    ...state.settings,
+    ...s,
+    design: normalizeDesign(s.design || state.settings.design),
+    audio: { ...state.settings.audio, ...(s.audio || {}) },
+  };
   state.lines = p.lines || [];
   $("inpTitle").value = state.settings.title;
   $("selLayout").value = state.settings.layout;
   $("inpGap").value = state.settings.gap;
   $("gapVal").textContent = `${Number(state.settings.gap).toFixed(2)}秒`;
+  renderer.restyle();
   applyFormat();
+  syncAudioUi();
   computeSpeech();
+}
+
+function syncAudioUi() {
+  const a = state.settings.audio;
+  $("chkVoiceAuto").checked = a.voiceAuto;
+  $("inpVoice").value = a.voice;
+  $("inpSfx").value = a.sfx;
+  $("voiceVal").textContent = `${a.voice}%`;
+  $("sfxVal").textContent = `${a.sfx}%`;
+  if (voiceBus) { const g = gains(); voiceBus.gain.value = g.voice; sfxBus.gain.value = g.sfx; }
 }
 
 // ---------------------------------------------------------------- helpers
@@ -496,6 +603,32 @@ $("btnAddLine").onclick = async () => {
   await refresh(true);
 };
 $("btnExport").onclick = doExport;
+
+// 字幕デザイン：保存・読み込み・標準にする・初期に戻す
+const setDesign = (d) => { state.settings.design = normalizeDesign(d); refreshDesignPanel(); designChanged(); };
+$("btnDesignSave").onclick = () => download(new Blob([JSON.stringify(state.settings.design, null, 2)], { type: "application/json" }), "字幕デザイン.json");
+$("inpDesign").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try { setDesign(JSON.parse(await f.text())); setStatus("designStatus", `「${f.name}」を読み込みました。`); }
+  catch { setStatus("designStatus", "デザインのファイルを読み込めませんでした。", true); }
+};
+$("btnDesignDefault").onclick = () => {
+  localStorage.setItem(DESIGN_KEY, JSON.stringify(state.settings.design));
+  setStatus("designStatus", "このデザインを、新しく始める作業の標準にしました。");
+};
+$("btnDesignReset").onclick = () => {
+  if (!confirm("字幕のデザインを初期設定に戻しますか？")) return;
+  setDesign(DEFAULT_DESIGN);
+  setStatus("designStatus", "初期設定に戻しました。");
+};
+
+// 音量
+const audioChanged = () => { syncAudioUi(); save(); };
+$("chkVoiceAuto").onchange = (e) => { state.settings.audio.voiceAuto = e.target.checked; audioChanged(); };
+$("inpVoice").oninput = (e) => { state.settings.audio.voice = Number(e.target.value); audioChanged(); };
+$("inpSfx").oninput = (e) => { state.settings.audio.sfx = Number(e.target.value); audioChanged(); };
 $("btnSrt").onclick = () => download(new Blob([toSrt(state.items)], { type: "text/plain" }), baseName() + ".srt");
 $("btnSaveProject").onclick = () => download(new Blob([JSON.stringify(projectData(), null, 1)], { type: "application/json" }), baseName() + "_telop.json");
 $("inpProject").onchange = async (e) => {
