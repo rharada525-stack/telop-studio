@@ -110,6 +110,7 @@ tr.is-cut textarea { text-decoration: line-through; }
 .auto-bar label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .auto-bar .ghost.small { margin-top: 0; }
 .auto-bar .status { flex: 1 1 100%; margin: 0; }
+.auto-bar .hl-switch { flex: 1 1 100%; color: var(--text); font-size: 12px; }
 
 /* 話者 */
 .speaker-opt { margin-top: 10px; align-items: center; }

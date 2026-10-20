@@ -133,7 +133,7 @@ function charState(kind, u, size) {
   return [1, 0, 1, 0];
 }
 
-const measureCtx = canvas(4, 4).getContext("2d");
+const measureCtx = canvas(4, 4).getContext("2d", { willReadFrequently: true });
 
 export class Block {
   constructor(st, text) {
@@ -209,15 +209,20 @@ export class Block {
   }
 
   makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc, textW) {
-    const l = -mt.actualBoundingBoxLeft - maxsw, r = mt.actualBoundingBoxRight + maxsw;
-    const t = -mt.actualBoundingBoxAscent - maxsw, b = mt.actualBoundingBoxDescent + maxsw;
+    // 描く範囲は測った大きさより広めにとる（測り方が少しずれても文字が切れて線が残らないように）
+    const size = this.size;
+    const l = Math.min(-mt.actualBoundingBoxLeft, -0.2 * size) - maxsw;
+    const r = Math.max(mt.actualBoundingBoxRight, mt.width + 0.2 * size) + maxsw;
+    const t = Math.min(-mt.actualBoundingBoxAscent, -1.1 * size) - maxsw;
+    const b = Math.max(mt.actualBoundingBoxDescent, 0.35 * size) + maxsw;
     const g = { w: Math.ceil(r - l + 2 * m), h: Math.ceil(b - t + 2 * m) };
     const ox = m - l, oy = m - t;
     g.x = pen + l - m;
     g.y = by + t - m;
     const layer = (fn) => {
       const c = canvas(g.w, g.h);
-      const ctx = c.getContext("2d");
+      // 文字はCPUで描く（GPUで描くと、フォント読み込み直後に別の字の欠片が混ざることがある）
+      const ctx = c.getContext("2d", { willReadFrequently: true });
       ctx.font = font;
       ctx.textBaseline = "alphabetic";
       ctx.lineJoin = "round";
@@ -446,6 +451,32 @@ export function resolveStyles(raw) {
   return out;
 }
 
+// フォントを読み込み、実際に描画に使える状態になるまで待つ。
+// Chrome は読み込み完了の直後だと canvas にまだ反映されていないことがあり、そのまま作ると
+// 文字の大きさを代わりのフォントで測ってしまい、文字の一部が切れて線のように残る。
+const readyChars = new Set(); // 確認済みの「フォント|文字」。2回目からは待たない
+async function ensureFonts(fonts, chars) {
+  const keys = fonts.flatMap((f) => [...new Set(chars)].map((c) => `${f}|${c}`));
+  if (keys.every((k) => readyChars.has(k))) return;
+  await waitFonts(fonts, chars);
+  keys.forEach((k) => readyChars.add(k));
+}
+async function waitFonts(fonts, chars) {
+  for (let tries = 0; tries < 20; tries++) {
+    await Promise.all(fonts.map((f) => document.fonts.load(f, chars).catch(() => {})));
+    if (fonts.every((f) => document.fonts.check(f, chars))) {
+      // 読み込み直後の反映待ち：測った幅が2回続けて同じになれば使える
+      const probe = canvas(4, 4).getContext("2d");
+      const widths = () => fonts.map((f) => { probe.font = f; return probe.measureText(chars).width; }).join(",");
+      const w1 = widths();
+      await new Promise((r) => setTimeout(r, 30));
+      if (w1 === widths()) return;
+    } else {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+}
+
 // フォントの該当サブセットを先に読み込んでから作る
 export async function makeItem(it, styles, W, H, fps) {
   const st = styles[it.style];
@@ -453,7 +484,7 @@ export async function makeItem(it, styles, W, H, fps) {
   if (st.effect === "flash") return new Flash(st, W, H);
   const fonts = st.group ? [styles[st.label_style], styles[st.body_style]] : [st];
   const chars = (it.label || "") + it.text;
-  await Promise.all(fonts.map((f) => document.fonts.load(fontCss(f, 100), chars).catch(() => {})));
+  await ensureFonts(fonts.map((f) => fontCss(f, 100)), chars);
   const pos = [...(it.pos || st.pos || [W / 2, H / 2])];
   const item = st.group ? new GroupItem(st, styles, it.label || "", it.text, pos) : new TextItem(st, it.text, pos);
   // 左上・右上に置くときは、テロップの端を指定位置にそろえる

@@ -18,7 +18,6 @@ const CTA = /(フォロー|保存|チャンネル登録|高評価|コメント|�
 const NUMBER = /([0-9０-９]+(?:\.[0-9]+)?|[一二三四五六七八九十百千万]+)(割|%|％|分|秒|時間|日|円|万円|倍|回|個|人|年|ヶ月|か月|キロ|kg|cm|位|歳|度|杯|本|枚|品|件|歩|kcal|カロリー|グラム|g)/g;
 // 見出し「その1」のあとに続く「次に／最後に」は、その2・その3 として扱う
 const NEXT_ITEM = /^(次に?は?|続いて|それから|最後に?は?|ラストは)[、,\s]*/;
-const ACCENT_WORDS = /(実は|絶対|必ず|一番|最強|裏ワザ|裏技|コツ|秘密|簡単|無料|ポイント|大事|重要)/g;
 
 export const MODES = { short: "ショート向け", long: "長尺向け" };
 export const STRENGTH = { low: "控えめ", mid: "標準", high: "派手" };
@@ -41,10 +40,17 @@ const plain = (t) => t.replace(/[{}\n]/g, "");
 const untouched = (l) => !l.cut && !l.fx && (!l.screen || l.screen === "auto");
 const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-// { } で強調（数字＋単位、強い言葉）。すでに { } がある行はそのまま
-function accent(text) {
+// 字幕の大事な言葉を { } で強調色にする（表示のときに使う。元の文字は変えない）
+// 数字＋単位、強い言葉、「」の中。自分で { } を付けた行はそのまま
+const HIGHLIGHT_WORDS = /(実は|絶対|必ず|一番|最強|最高|最悪|裏ワザ|裏技|コツ|秘密|簡単|無料|ポイント|大事|重要|注意|限定|必見|本当に|めちゃくちゃ|超|激|神|驚き|衝撃|正解|不正解|NG|OK|初めて|唯一|全部|完全)/g;
+export function highlight(text) {
   if (/[{}]/.test(text)) return text;
-  return text.replace(NUMBER, "{$&}").replace(ACCENT_WORDS, "{$&}").replace(/\}\{/g, "");
+  return text
+    .replace(/「([^」]{1,12})」/g, "「{$1}」")
+    .replace(NUMBER, (m) => `{${m}}`)
+    .replace(HIGHLIGHT_WORDS, (m) => `{${m}}`)
+    .replace(/\{([^{}]*)\{([^{}]*)\}([^{}]*)\}/g, "{$1$2$3}") // 入れ子になったら1つにまとめる
+    .replace(/\}\{/g, "");
 }
 
 const kanjiNum = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, ひと: 1, ふた: 2, みっ: 3 };
@@ -167,11 +173,7 @@ export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [
       continue;
     }
 
-    // 10) 強調色（数字や強い言葉）
-    const before = l.text;
-    l.text = accent(l.text);
-    if (l.text !== before) n.accent++;
-
+    // 10) 強調色は「字幕の大事な言葉を自動で強調色にする」スイッチで表示時に付けるので、ここでは文字を変えない
     const canZoom = i - lastZoom >= P.zoomGap && i - lastFx >= 1;
     const zoom = (scr = "zoom") => { l.screen = scr; n.zoom++; lastZoom = lastFx = i; };
 
@@ -204,7 +206,7 @@ export function describe(n) {
   const parts = [
     [n.hook, "つかみ"], [n.point, "見出し"], [n.topic, "話題の見出し"], [n.summary, "まとめ"], [n.react, "ツッコミ"],
     [n.laugh, "（笑）"], [n.reveal, "オチ"], [n.keyword, "キーワード"], [n.cta, "締め"], [n.zoom, "ズーム"],
-    [n.dark, "暗転"], [n.accent, "強調色"], [n.cut, "つなぎ言葉のカット"],
+    [n.dark, "暗転"], [n.cut, "つなぎ言葉のカット"],
   ].filter(([c]) => c).map(([c, s]) => `${s}${c}`);
   return parts.length ? parts.join("・") : "付けられる演出が見つかりませんでした";
 }

@@ -1,4 +1,5 @@
 // 音声解析（無音検出）・字幕の分割・カット後の時間変換・テロップ一覧の生成
+import { highlight } from "./autoedit.js";
 
 // ---------------------------------------------------------------- audio
 export async function decodeAudio(file) {
@@ -306,7 +307,8 @@ export function buildItems(lines, segs, settings) {
     const design = sp?.design;
     const subStyle = sp ? `subtitle@${sp.id}` : "subtitle";
     const wrapAt = design?.maxChars?.[aspect] || (aspect === "landscape" ? 26 : 13);
-    if (!replaces) items.push({ style: subStyle, text: wrapLine(l.text, wrapAt), t: t0, d: end - t0, line: l.id });
+    const shown = settings.autoHighlight === false ? l.text : highlight(l.text); // 大事な言葉を自動で強調色に
+    if (!replaces) items.push({ style: subStyle, text: wrapLine(shown, wrapAt), t: t0, d: end - t0, line: l.id });
 
     let d = Math.max(1.4, end - t0);
     if (fx && fx.style) {

@@ -24,6 +24,7 @@ const state = {
   segs: [],
   settings: {
     title: "", layout: "auto", gap: 0.3, aspect: "portrait",
+    autoHighlight: true, // 字幕の大事な言葉を自動で強調色にする
     speakers: [{ id: "A", name: "話者A", design: loadDefaultDesign() }], // 話者ごとの字幕デザイン
     audio: { voiceAuto: true, voice: 100, sfx: 40 },  // 音量（%）
   },
@@ -133,6 +134,7 @@ let designTimer;
 function designChanged() {
   clearTimeout(designTimer);
   designTimer = setTimeout(async () => {
+    designTimer = null;
     renderer.restyle();
     if (state.clips.length) await refresh(false);
     else drawDesignSample();
@@ -348,7 +350,21 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(() => refresh(false), 250);
 }
 
-async function refresh(rebuildTable) {
+// 作り直しは順番に1つずつ（途中で書き出しが始まって、古いテロップと新しいテロップが混ざらないように）
+let refreshChain = Promise.resolve();
+function refresh(rebuildTable) {
+  refreshChain = refreshChain.then(() => doRefresh(rebuildTable)).catch((e) => console.error(e));
+  return refreshChain;
+}
+
+// 書き出しの前に、待ち中の変更をすべて反映し終える
+async function settle() {
+  if (designTimer) { clearTimeout(designTimer); designTimer = null; renderer.restyle(); }
+  clearTimeout(refreshTimer);
+  await refresh(false);
+}
+
+async function doRefresh(rebuildTable) {
   if (!state.clips.length) return;
   state.segs = buildSegments(state.speech, state.lines);
   const total = totalDuration(state.segs);
@@ -580,6 +596,7 @@ async function doExport() {
   const suffix = state.settings.aspect === "landscape" ? "_telop_16x9.mp4" : "_telop.mp4";
   showProgress("expProgress", 0);
   try {
+    await settle();
     setStatus("expStatus", "音声をミックス中…");
     const audio = await mixAudio(state.clips, state.segs, renderer.sfxEvents(), sfxBuffers, gains());
     setStatus("expStatus", "書き出し中…");
@@ -634,6 +651,7 @@ function applyProject(p) {
   renderSpeakerBar();
   refreshDesignPanel();
   $("inpTitle").value = state.settings.title;
+  $("chkHighlight").checked = state.settings.autoHighlight !== false;
   $("selLayout").value = state.settings.layout;
   $("inpGap").value = state.settings.gap;
   $("gapVal").textContent = `${Number(state.settings.gap).toFixed(2)}秒`;
@@ -714,6 +732,7 @@ $("btnPremiere").onclick = async () => {
   btn.disabled = true;
   document.body.classList.add("busy");
   try {
+    await settle();
     setStatus("prStatus", "テロップを画像にしています…");
     const name = baseName() + (state.settings.aspect === "landscape" ? "_16x9" : "");
     const blob = await buildPremierePackage({
@@ -745,6 +764,7 @@ $("btnAuto").onclick = async () => {
   $("btnUndoAuto").hidden = false;
 };
 $("selMode").onchange = (e) => { e.target.dataset.touched = "1"; };
+$("chkHighlight").onchange = (e) => { state.settings.autoHighlight = e.target.checked; refresh(false); };
 $("btnUndoAuto").onclick = async () => {
   if (!beforeAuto) return;
   state.lines = beforeAuto;
