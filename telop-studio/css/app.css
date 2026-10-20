@@ -94,6 +94,13 @@ tr.current td { background: #2b2230; }
 tr.is-cut td { opacity: .45; }
 tr.is-cut textarea { text-decoration: line-through; }
 
+/* Premiere 書き出し */
+.premiere-box { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.premiere-box h3 { margin: 0 0 6px; font-size: 14px; color: #c9a7ff; }
+.premiere-box .folder { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.premiere-box .folder small { font-size: 11px; }
+#btnPremiere { background: linear-gradient(90deg, #6a3dd6, #9a5bff); }
+
 /* おまかせ編集 */
 .auto-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
   border-radius: 10px; background: linear-gradient(90deg, #3a2030, #2a2440); border: 1px solid #5a3550; }

@@ -8,6 +8,7 @@ import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
 import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
 import { autoEdit, describe } from "./autoedit.js";
+import { buildPremierePackage } from "./premiere.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -359,6 +360,7 @@ async function refresh(rebuildTable) {
   for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = !state.segs.length;
   $("btnDiarize").disabled = !state.lines.length;
   $("btnAuto").disabled = !state.lines.length;
+  $("btnPremiere").disabled = !state.segs.length;
   save();
   if (!state.playing) await seekTo(state.t);
 }
@@ -699,6 +701,36 @@ $("btnAddLine").onclick = async () => {
   await refresh(true);
 };
 $("btnExport").onclick = doExport;
+
+// Premiere 用 ZIP
+const FOLDER_KEY = "telop-studio:sourceFolder";
+try { $("inpFolder").value = localStorage.getItem(FOLDER_KEY) || ""; } catch { /* なくてもよい */ }
+$("inpFolder").oninput = (e) => { try { localStorage.setItem(FOLDER_KEY, e.target.value.trim().replace(/^"|"$/g, "")); } catch { /* なくてもよい */ } };
+$("btnPremiere").onclick = async () => {
+  stop();
+  const btn = $("btnPremiere");
+  btn.disabled = true;
+  document.body.classList.add("busy");
+  try {
+    setStatus("prStatus", "テロップを画像にしています…");
+    const name = baseName() + (state.settings.aspect === "landscape" ? "_16x9" : "");
+    const blob = await buildPremierePackage({
+      clips: state.clips, segs: state.segs, renderer, settings: state.settings, items: state.items,
+      gains: gains(), sfxEvents: renderer.sfxEvents(), sfxBuffers,
+      folder: $("inpFolder").value.trim().replace(/^"|"$/g, ""), name,
+      onProgress: (p) => setStatus("prStatus", `書き出し中… ${Math.round(p * 100)}%`),
+    });
+    download(blob, `${name}_premiere.zip`);
+    setStatus("prStatus", `完了（${(blob.size / 1e6).toFixed(1)}MB）。ZIP を元の動画と同じフォルダに展開し、中の「はじめにお読みください.txt」の手順で読み込んでください。`);
+  } catch (e) {
+    console.error(e);
+    setStatus("prStatus", `エラー：${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+    document.body.classList.remove("busy");
+    seekTo(state.t);
+  }
+};
 
 // おまかせ編集（押す前の状態を覚えておき、「元に戻す」で戻せる）
 let beforeAuto = null;

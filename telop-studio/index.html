@@ -148,6 +148,17 @@
       </div>
       <div class="progress" hidden id="expProgress"><div></div></div>
       <p class="status" id="expStatus">書き出し中はこのタブを開いたままにしてください（動画の長さと同じくらい時間がかかります）。</p>
+
+      <div class="premiere-box">
+        <h3>Premiere Pro で仕上げる</h3>
+        <p class="hint">カット・テロップ・効果音を並べた状態の編集データ（XML）を、画像や効果音と一緒に ZIP で書き出します。</p>
+        <label class="folder">元の動画が入っているフォルダ（あると便利）
+          <input id="inpFolder" type="text" placeholder="例：C:\Users\名前\Videos\撮影1">
+          <small>エクスプローラーでそのフォルダを開き、上のアドレス欄をコピーして貼り付けます。空のままでも、Premiere で開くときに場所を選べば使えます。</small>
+        </label>
+        <button id="btnPremiere" class="primary" disabled>Premiere 用に書き出す（ZIP）</button>
+        <p class="status" id="prStatus">ZIP は元の動画と同じフォルダに展開してから、Premiere で中の XML を読み込みます。</p>
+      </div>
     </div>
   </section>
 </main>
