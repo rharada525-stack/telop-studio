@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>テロップスタジオ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=M+PLUS+Rounded+1c:wght@800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">テロップスタジオ <span class="tag">ショート動画</span></div>
+  <div class="top-actions">
+    <button id="btnSaveProject" class="ghost" disabled>作業を保存</button>
+    <label class="ghost button">作業を開く<input id="inpProject" type="file" accept=".json" hidden></label>
+  </div>
+</header>
+
+<div id="unsupported" class="banner" hidden>このブラウザでは動画の書き出しができません。パソコンの Chrome か Edge で開いてください。</div>
+
+<main class="layout">
+  <section class="stage">
+    <div class="phone"><canvas id="preview" width="1080" height="1920"></canvas>
+      <div id="dropHint" class="drop-hint">ここに動画をドロップ</div>
+    </div>
+    <div class="transport">
+      <button id="btnPlay" class="round" disabled aria-label="再生">▶</button>
+      <input id="seek" type="range" min="0" max="1" step="0.001" value="0" disabled>
+      <span id="time" class="mono">0:00.0 / 0:00.0</span>
+    </div>
+    <video id="video" playsinline preload="auto" hidden></video>
+  </section>
+
+  <section class="panel">
+    <div class="card" id="step1">
+      <h2><span class="num">1</span>素材を選ぶ</h2>
+      <label class="dropzone" id="dropzone">
+        <input id="inpVideo" type="file" accept="video/*" hidden>
+        <span id="fileLabel">話している動画を選ぶ（またはドロップ）</span>
+      </label>
+      <div class="row">
+        <label>画面の合わせ方
+          <select id="selLayout">
+            <option value="cover">縦に切り抜く（縦長の素材）</option>
+            <option value="fit">全体を表示＋ぼかし背景（横長の素材）</option>
+          </select>
+        </label>
+        <label>タイトル帯（空なら出さない）
+          <input id="inpTitle" type="text" placeholder="例：コンビニコーヒー裏ワザ">
+        </label>
+      </div>
+    </div>
+
+    <div class="card" id="step2">
+      <h2><span class="num">2</span>自動カット＋文字起こし</h2>
+      <div class="row">
+        <label>文字起こしの精度
+          <select id="selModel">
+            <option value="onnx-community/whisper-base">速い（約80MB）</option>
+            <option value="onnx-community/whisper-small" selected>標準（約250MB）</option>
+            <option value="onnx-community/whisper-large-v3-turbo">高精度（約800MB・高性能PC向け）</option>
+          </select>
+        </label>
+        <button id="btnAnalyze" class="primary" disabled>解析する</button>
+      </div>
+      <div class="progress" hidden id="anaProgress"><div></div></div>
+      <p class="status" id="anaStatus">音声は外部に送信されず、このパソコンの中だけで処理されます。</p>
+      <label class="slider">間の詰め具合 <span id="gapVal" class="mono">0.30秒</span>
+        <input id="inpGap" type="range" min="0.1" max="1.0" step="0.05" value="0.3">
+        <small>これより短い無言は残し、長い無言はカットします</small>
+      </label>
+      <p class="summary" id="cutSummary"></p>
+    </div>
+
+    <div class="card grow" id="step3">
+      <h2><span class="num">3</span>テロップを直す</h2>
+      <p class="hint">文字は直接書き換えられます。<b>{ }</b> で囲むと強調色。演出を選んで「演出の文字」を空のままにすると、その字幕自体が演出テロップになります。「カット」にチェックすると、その部分の映像ごと削除します。</p>
+      <div class="table-wrap">
+        <table id="lines">
+          <thead><tr><th>時間</th><th>字幕</th><th>演出</th><th>演出の文字</th><th>カット</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button id="btnAddLine" class="ghost small" disabled>＋ 今の位置に字幕を追加</button>
+    </div>
+
+    <div class="card" id="step4">
+      <h2><span class="num">4</span>書き出す</h2>
+      <div class="row">
+        <button id="btnExport" class="primary" disabled>MP4 を書き出す</button>
+        <button id="btnSrt" class="ghost" disabled>字幕ファイル（SRT）</button>
+      </div>
+      <div class="progress" hidden id="expProgress"><div></div></div>
+      <p class="status" id="expStatus">書き出し中はこのタブを開いたままにしてください（動画の長さと同じくらい時間がかかります）。</p>
+    </div>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

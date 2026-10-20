@@ -1,0 +1,46 @@
+{
+  "title": "コンビニコーヒー裏ワザ3選（仮台本）",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "duration": 31.5,
+
+  "scenes": [
+    { "t": 0.0,  "d": 7.6, "bg": "bg_cafe",   "zoom": [1.00, 1.06], "marker": "#1 フック" },
+    { "t": 7.6,  "d": 7.2, "bg": "bg_point",  "zoom": [1.04, 1.00], "marker": "#2 裏ワザ① " },
+    { "t": 14.8, "d": 6.2, "bg": "bg_point2", "zoom": [1.00, 1.05], "marker": "#3 裏ワザ②" },
+    { "t": 21.0, "d": 6.0, "bg": "bg_reveal", "zoom": [1.00, 1.08], "marker": "#4 オチ" },
+    { "t": 27.0, "d": 4.5, "bg": "bg_end",    "zoom": [1.05, 1.00], "marker": "#5 CTA" }
+  ],
+
+  "items": [
+    { "t": 0.0,  "d": 2.6, "style": "speedlines" },
+    { "t": 0.1,  "d": 2.5, "style": "hook",     "text": "9割が知らない！" },
+    { "t": 0.75, "d": 1.85, "style": "keyword", "text": "コンビニコーヒーの\n{裏ワザ}3選" },
+
+    { "t": 2.6,  "d": 24.4, "style": "header",  "text": "コンビニコーヒー裏ワザ" },
+
+    { "t": 2.9,  "d": 2.3, "style": "subtitle", "text": "毎日なんとなく飲んでる\nコンビニコーヒー" },
+    { "t": 5.2,  "d": 2.4, "style": "subtitle", "text": "実はひと工夫で\n{もっと美味しくなる}んです" },
+    { "t": 6.0,  "d": 1.5, "style": "tsukkomi", "text": "えっ!?" },
+
+    { "t": 7.7,  "d": 7.0, "style": "point", "label": "その1", "text": "氷は先に揺らす" },
+    { "t": 8.3,  "d": 2.6, "style": "subtitle", "text": "フタを閉めたまま\nカップを軽く5回振る" },
+    { "t": 10.9, "d": 2.1, "style": "subtitle", "text": "氷の表面が溶けて\nコーヒーが{一気に冷える}" },
+    { "t": 13.0, "d": 1.7, "style": "keyword",  "text": "{薄まらない}！", "pos": [540, 1020] },
+
+    { "t": 14.8, "d": 6.1, "style": "point", "label": "その2", "text": "フタは飲む直前に" },
+    { "t": 15.4, "d": 2.5, "style": "subtitle", "text": "フタを開けるのは\n{飲む直前}がベスト" },
+    { "t": 17.9, "d": 2.9, "style": "subtitle", "text": "立ちのぼる香りが\n味の印象を変えるんです" },
+    { "t": 19.0, "d": 1.7, "style": "tsukkomi_green", "text": "なるほど！" },
+
+    { "t": 21.0, "d": 1.9, "style": "subtitle", "text": "そして最後の裏ワザは…", "sfx": "drumroll", "sfx_offset": 0.2 },
+    { "t": 22.9, "d": 0.4, "style": "flash" },
+    { "t": 22.9, "d": 1.3, "style": "speedlines_white" },
+    { "t": 22.9, "d": 4.0, "style": "reveal",   "text": "ホットは\n{3分}待つ！" },
+    { "t": 24.4, "d": 2.5, "style": "subtitle", "text": "少し冷めた方が\n{甘み}を感じやすい" },
+
+    { "t": 27.2, "d": 4.2, "style": "cta_main", "text": "保存して\n明日{試してみて}！" },
+    { "t": 28.0, "d": 3.4, "style": "cta",      "text": "フォローで毎日1分雑学" }
+  ]
+}

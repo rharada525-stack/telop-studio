@@ -1,0 +1,9 @@
+# Python 版の書き出し結果（数百MBになるので保存しない。build.py でいつでも作り直せる）
+short-template/output/
+__pycache__/
+*.pyc
+
+# エディタ・OS
+.DS_Store
+Thumbs.db
+desktop.ini

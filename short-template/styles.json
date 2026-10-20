@@ -1,0 +1,129 @@
+{
+  "_comment": "テロップのデザイン定義。strokes の w は文字の輪郭からの累積幅(px)。{...} で囲んだ文字は accent の塗りになる。",
+
+  "hook": {
+    "z": 5, "font": "NotoSansJP-Black.otf", "size": 150, "max_width": 980,
+    "fill": ["#ffffff", "#ffe3e3"],
+    "strokes": [ { "w": 14, "color": "#e60033" }, { "w": 28, "color": "#1a0006" } ],
+    "shadows": [ { "dx": 0, "dy": 14, "blur": 10, "color": "#000000aa" } ],
+    "pos": [540, 760], "rotate": -4,
+    "in": "slam", "out": "zoom_out", "idle": "none",
+    "sfx": "don", "sfx_offset": 0.13
+  },
+
+  "keyword": {
+    "z": 5, "font": "NotoSansJP-Black.otf", "size": 108, "max_width": 1000, "line_spacing": 1.05,
+    "fill": ["#fff9b0", "#ffd400", "#ff9500"],
+    "accent": ["#ffd0e0", "#ff4d7e", "#e0003a"],
+    "strokes": [ { "w": 9, "color": "#4a1e00" }, { "w": 19, "color": "#ffffff" }, { "w": 25, "color": "#3a1500" } ],
+    "shadows": [ { "dx": 0, "dy": 10, "blur": 8, "color": "#00000099" } ],
+    "pos": [540, 1080],
+    "in": "none", "char": "pop", "stagger": 0.035, "out": "pop_out", "idle": "pulse",
+    "sfx": "kira", "sfx_offset": 0.0
+  },
+
+  "subtitle": {
+    "z": 3, "font": "NotoSansJP-Black.otf", "size": 66, "max_width": 960, "line_spacing": 1.18,
+    "fill": "#ffffff",
+    "accent": "#ffe14d",
+    "strokes": [ { "w": 9, "color": "#121212" } ],
+    "shadows": [ { "dx": 0, "dy": 5, "blur": 6, "color": "#00000088" } ],
+    "pos": [540, 1390],
+    "in": "none", "char": "type", "stagger": 0.022, "out": "fade", "out_d": 0.12, "idle": "none",
+    "sfx": null
+  },
+
+  "tsukkomi": {
+    "z": 6, "font": "GenEiNuGothic-EB.ttf", "size": 124, "max_width": 600,
+    "fill": ["#ffffff", "#d6f3ff"],
+    "strokes": [ { "w": 10, "color": "#0a8fe0" }, { "w": 21, "color": "#ffffff" }, { "w": 26, "color": "#00335c" } ],
+    "shadows": [ { "dx": 0, "dy": 10, "blur": 8, "color": "#00000088" } ],
+    "pos": [790, 1150], "rotate": -10,
+    "in": "elastic", "out": "shrink", "idle": "float",
+    "sfx": "question", "sfx_offset": 0.0
+  },
+
+  "tsukkomi_green": {
+    "extends": "tsukkomi",
+    "fill": ["#ffffff", "#e3ffd9"],
+    "strokes": [ { "w": 10, "color": "#20b030" }, { "w": 21, "color": "#ffffff" }, { "w": 26, "color": "#0b4012" } ],
+    "pos": [370, 1160], "rotate": 8, "max_width": 520,
+    "sfx": "pikon"
+  },
+
+  "point": {
+    "z": 4, "group": true,
+    "label_style": "point_label", "body_style": "point_body",
+    "pos": [540, 560], "gap": -18, "body_delay": 0.12,
+    "out": "slide_out_left", "out_d": 0.22,
+    "sfx": "whoosh", "sfx_offset": 0.0
+  },
+  "point_label": {
+    "font": "NotoSansJP-Black.otf", "size": 60,
+    "fill": "#ffffff",
+    "strokes": [],
+    "plate": { "type": "round", "radius": 22, "fill": ["#ff4766", "#d4002b"], "pad": [26, 14],
+               "stroke": { "w": 6, "color": "#ffffff" },
+               "shadow": { "dx": 0, "dy": 8, "blur": 8, "color": "#00000077" } },
+    "rotate": -4, "in": "pop", "idle": "none"
+  },
+  "point_body": {
+    "font": "NotoSansJP-Black.otf", "size": 74, "max_width": 760,
+    "fill": "#1b1b1b",
+    "strokes": [],
+    "plate": { "type": "slant", "skew": 0.22, "fill": ["#ffffff", "#ececec"], "pad": [46, 22],
+               "bar": { "h": 10, "color": "#ff4766" },
+               "shadow": { "dx": 0, "dy": 10, "blur": 10, "color": "#00000066" } },
+    "plate_anim": "wipe", "char": "type", "char_delay": 0.16, "stagger": 0.03,
+    "in": "none", "idle": "none"
+  },
+
+  "header": {
+    "z": 7, "font": "NotoSansJP-Black.otf", "size": 52, "max_width": 900,
+    "fill": "#ffffff",
+    "strokes": [ { "w": 5, "color": "#80001a" } ],
+    "plate": { "type": "round", "radius": 999, "fill": ["#ff7a3d", "#e8173c"], "pad": [48, 18],
+               "stroke": { "w": 6, "color": "#ffffff" },
+               "shadow": { "dx": 0, "dy": 8, "blur": 10, "color": "#00000077" } },
+    "pos": [540, 250],
+    "in": "drop", "out": "fade", "idle": "none",
+    "sfx": "pop", "sfx_offset": 0.2
+  },
+
+  "reveal": {
+    "z": 5, "font": "NotoSansJP-Black.otf", "size": 168, "max_width": 1000, "line_spacing": 1.02,
+    "fill": ["#fffbe0", "#ffd84a", "#e08f00"],
+    "accent": ["#ffffff", "#ffb3c6", "#ff2e63"],
+    "strokes": [ { "w": 12, "color": "#5a2a00" }, { "w": 25, "color": "#ffffff" }, { "w": 32, "color": "#4a1d00" } ],
+    "shadows": [ { "dx": 0, "dy": 0, "blur": 34, "color": "#ffcc33bb" }, { "dx": 0, "dy": 14, "blur": 10, "color": "#000000aa" } ],
+    "pos": [540, 880],
+    "in": "slam", "out": "zoom_out", "idle": "pulse",
+    "sfx": "jan", "sfx_offset": 0.0
+  },
+
+  "cta_main": {
+    "extends": "keyword",
+    "size": 112, "pos": [540, 900],
+    "fill": ["#ffffff", "#ffe0ea", "#ffb3c9"],
+    "accent": ["#fff9b0", "#ffd400", "#ff9500"],
+    "strokes": [ { "w": 9, "color": "#b0003a" }, { "w": 19, "color": "#ffffff" }, { "w": 25, "color": "#4d0019" } ],
+    "char": "drop", "stagger": 0.04, "out": "fade",
+    "sfx": "pop", "sfx_offset": 0.05
+  },
+
+  "cta": {
+    "z": 6, "font": "NotoSansJP-Black.otf", "size": 56, "max_width": 900,
+    "fill": "#e8173c",
+    "strokes": [],
+    "plate": { "type": "round", "radius": 999, "fill": ["#ffffff", "#f3f3f3"], "pad": [52, 22],
+               "stroke": { "w": 7, "color": "#e8173c" },
+               "shadow": { "dx": 0, "dy": 10, "blur": 12, "color": "#00000077" } },
+    "pos": [540, 1220],
+    "in": "pop", "out": "fade", "idle": "pulse",
+    "sfx": "pikon", "sfx_offset": 0.05
+  },
+
+  "speedlines":       { "z": 1, "effect": "speedlines", "color": "#000000", "alpha": 0.55, "center": [540, 900], "sfx": null },
+  "speedlines_white": { "z": 1, "effect": "speedlines", "color": "#ffffff", "alpha": 0.7,  "center": [540, 880], "sfx": null },
+  "flash":            { "z": 9, "effect": "flash", "color": "#ffffff", "sfx": null }
+}
