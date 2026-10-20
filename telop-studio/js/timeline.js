@@ -289,7 +289,7 @@ function screenItems(effect, t, d) {
 export function buildItems(lines, segs, settings) {
   const total = totalDuration(segs);
   const aspect = settings.aspect || "portrait";
-  const design = settings.design;
+  const speakers = settings.speakers || [];
   const live = lines.filter((l) => !l.cut).map((l) => ({ l, t0: srcToOut(segs, l.src[0]), t1: srcToOut(segs, l.src[1]) }));
   const items = [];
   if (settings.title) items.push({ style: "header", text: settings.title, t: 0.2, d: Math.max(1, total - 0.2) });
@@ -301,8 +301,12 @@ export function buildItems(lines, segs, settings) {
     const fx = FX[l.fx];
     const ownText = (l.fxText || "").trim();
     const replaces = !!(fx && fx.style && !ownText); // 字幕そのものを演出テロップにする
+    // 話者ごとの字幕デザイン（スタイル名は subtitle@話者ID）
+    const sp = speakers.find((s) => s.id === l.speaker) || speakers[0];
+    const design = sp?.design;
+    const subStyle = sp ? `subtitle@${sp.id}` : "subtitle";
     const wrapAt = design?.maxChars?.[aspect] || (aspect === "landscape" ? 26 : 13);
-    if (!replaces) items.push({ style: "subtitle", text: wrapLine(l.text, wrapAt), t: t0, d: end - t0, line: l.id });
+    if (!replaces) items.push({ style: subStyle, text: wrapLine(l.text, wrapAt), t: t0, d: end - t0, line: l.id });
 
     let d = Math.max(1.4, end - t0);
     if (fx && fx.style) {
@@ -329,6 +333,28 @@ export function buildItems(lines, segs, settings) {
   return items.map((it) => ({ ...it, d: Math.min(it.d, total - it.t) })).filter((it) => it.d > 0.05);
 }
 
+// ---------------------------------------------------------------- speakers
+// 話者判別の結果を各字幕に割り当てる。いちばん長く重なっている話者にする。
+// 戻り値: 判別結果の番号 → 登場順の連番（0, 1, 2…）
+export function assignSpeakers(lines, segments) {
+  // 0 = 無音、1〜3 = 1人ずつ、4以上 = 2人が重なった区間（どちらか分からないので使わない）
+  const usable = segments.filter((s) => s.id >= 1 && s.id <= 3);
+  const order = [];
+  for (const l of lines) {
+    const score = {};
+    for (const s of usable) {
+      const ov = Math.min(l.src[1], s.end) - Math.max(l.src[0], s.start);
+      if (ov > 0) score[s.id] = (score[s.id] || 0) + ov;
+    }
+    const best = Object.entries(score).sort((a, b) => b[1] - a[1])[0];
+    if (!best) { l.speakerIndex = null; continue; }
+    const raw = Number(best[0]);
+    if (!order.includes(raw)) order.push(raw);
+    l.speakerIndex = order.indexOf(raw);
+  }
+  return order.length;
+}
+
 // ---------------------------------------------------------------- SRT
 const ts = (t) => {
   const ms = Math.round(t * 1000);
@@ -337,7 +363,7 @@ const ts = (t) => {
 };
 export function toSrt(items) {
   return items
-    .filter((it) => it.style === "subtitle")
+    .filter((it) => it.style.startsWith("subtitle"))
     .map((it, i) => `${i + 1}\n${ts(it.t)} --> ${ts(it.t + it.d)}\n${it.text.replace(/[{}]/g, "")}\n`)
     .join("\n");
 }

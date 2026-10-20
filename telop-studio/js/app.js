@@ -2,7 +2,7 @@ import { resolveStyles } from "./telop.js";
 import { Renderer } from "./render.js";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
-  totalDuration, srcToOut, outToSrc, toSrt, FX, FX_POS, SCREEN, FRAME, layoutClips, splitAtClips, clipAt,
+  totalDuration, srcToOut, outToSrc, toSrt, FX, FX_POS, SCREEN, FRAME, layoutClips, splitAtClips, clipAt, assignSpeakers,
 } from "./timeline.js";
 import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
@@ -22,9 +22,10 @@ const state = {
   segs: [],
   settings: {
     title: "", layout: "auto", gap: 0.3, aspect: "portrait",
-    design: loadDefaultDesign(),                       // 字幕のデザイン
+    speakers: [{ id: "A", name: "話者A", design: loadDefaultDesign() }], // 話者ごとの字幕デザイン
     audio: { voiceAuto: true, voice: 100, sfx: 40 },  // 音量（%）
   },
+  editSpeaker: "A", // デザインパネルで編集中の話者
   voiceAutoGain: 1, // 声を聞きやすい大きさにそろえる倍率（素材から計算）
   t: 0,             // 出力側の再生位置（秒）
   playing: false,
@@ -34,6 +35,60 @@ let renderer, sfxBuffers = {}, refreshDesignPanel = () => {};
 const DESIGN_KEY = "telop-studio:defaultDesign";
 function loadDefaultDesign() {
   try { return normalizeDesign(JSON.parse(localStorage.getItem(DESIGN_KEY))); } catch { return structuredClone(DEFAULT_DESIGN); }
+}
+
+// ---------------------------------------------------------------- speakers
+// 話者を追加したときの境界線の色（Aは初期デザインのまま）
+const SPEAKER_COLORS = ["#121212", "#1a5fd6", "#d62a4a", "#1f9d55", "#8a3fd1", "#e07b00"];
+const speakers = () => state.settings.speakers;
+const editingSpeaker = () => speakers().find((s) => s.id === state.editSpeaker) || speakers()[0];
+
+function addSpeaker() {
+  const list = speakers();
+  const ids = "ABCDEFGHIJ";
+  const id = [...ids].find((c) => !list.some((s) => s.id === c));
+  if (!id) return null;
+  const design = structuredClone(list[0].design);
+  const color = SPEAKER_COLORS[list.length % SPEAKER_COLORS.length];
+  if (design.strokes.length) design.strokes[0].color = color;
+  else design.strokes.push({ ...structuredClone(DEFAULT_DESIGN.strokes[0]), color });
+  const sp = { id, name: `話者${id}`, design };
+  list.push(sp);
+  return sp;
+}
+
+function renderSpeakerBar() {
+  const bar = $("speakerBar");
+  bar.innerHTML = "";
+  for (const sp of speakers()) {
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "sp-tab" + (sp.id === editingSpeaker().id ? " on" : "") });
+    const dot = document.createElement("i");
+    dot.style.background = sp.design.strokes[0]?.color || sp.design.fill.color;
+    b.append(dot, document.createTextNode(sp.name));
+    b.onclick = () => { state.editSpeaker = sp.id; renderSpeakerBar(); refreshDesignPanel(); };
+    bar.append(b);
+  }
+  const add = Object.assign(document.createElement("button"), { type: "button", className: "ghost small", textContent: "＋ 話者を追加" });
+  add.onclick = () => {
+    const sp = addSpeaker();
+    if (!sp) return;
+    state.editSpeaker = sp.id;
+    renderSpeakerBar();
+    refreshDesignPanel();
+    designChanged();
+    renderTable();
+  };
+  bar.append(add);
+  const cur = editingSpeaker();
+  $("inpSpeakerName").value = cur.name;
+  $("btnSpeakerDelete").disabled = speakers().length <= 1;
+}
+
+function speakersChanged() {
+  renderSpeakerBar();
+  refreshDesignPanel();
+  designChanged();
+  renderTable();
 }
 
 const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
@@ -47,12 +102,19 @@ async function init() {
   const raw = await (await fetch("styles.json")).json();
   const styles = resolveStyles(raw);
   renderer = new Renderer(styles, raw);
-  renderer.setOverrides((aspect) => ({ subtitle: designToStyle(state.settings.design, aspect) }));
-  refreshDesignPanel = buildDesignPanel($("designPanel"), {
-    getDesign: () => state.settings.design,
-    getAspect: () => state.settings.aspect,
-    onChange: () => designChanged(),
+  // 話者ごとの字幕スタイル subtitle@A, subtitle@B …（subtitle は話者Aと同じ）
+  renderer.setOverrides((aspect) => {
+    const o = {};
+    for (const sp of speakers()) o[`subtitle@${sp.id}`] = designToStyle(sp.design, aspect);
+    o.subtitle = o[`subtitle@${speakers()[0].id}`];
+    return o;
   });
+  refreshDesignPanel = buildDesignPanel($("designPanel"), {
+    getDesign: () => editingSpeaker().design,
+    getAspect: () => state.settings.aspect,
+    onChange: () => { designChanged(); renderSpeakerBar(); },
+  });
+  renderSpeakerBar();
   const ac = new AudioContext();
   const names = [...new Set(Object.values(styles).map((s) => s.sfx).filter(Boolean)), "drumroll"];
   await Promise.all(names.map(async (n) => {
@@ -78,7 +140,8 @@ function designChanged() {
 // 素材がないときもデザインを確認できるように見本を描く
 async function drawDesignSample() {
   if (state.clips.length) return;
-  await renderer.setItems([{ style: "subtitle", text: "字幕のデザイン見本\n{強調}はこの色になります", t: 0, d: 10 }]);
+  const sp = editingSpeaker();
+  await renderer.setItems([{ style: `subtitle@${sp.id}`, text: `${sp.name}の字幕見本\n{強調}はこの色になります`, t: 0, d: 10 }]);
   ctx.fillStyle = "#3a4250";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (const it of renderer.items) it.obj.draw(ctx, 5, 10);
@@ -224,13 +287,23 @@ function renderClipList() {
 
 // ---------------------------------------------------------------- step 2: analyze
 let worker;
-function analyze() {
+// 話者判別の結果を字幕に反映し、足りない話者を追加する
+function applySpeakers(segments) {
+  const n = assignSpeakers(state.lines, segments);
+  while (speakers().length < n) addSpeaker();
+  for (const l of state.lines) if (l.speakerIndex != null) l.speaker = speakers()[l.speakerIndex].id;
+  speakersChanged();
+  return n;
+}
+
+function analyze(onlySpeakers = false) {
   if (!state.pcm) return;
-  $("btnAnalyze").disabled = true;
+  $("btnAnalyze").disabled = $("btnDiarize").disabled = true;
   showProgress("anaProgress", 0);
   worker ||= new Worker("js/whisper-worker.js", { type: "module" });
   const device = "gpu" in navigator ? "webgpu" : "wasm";
   const files = {};
+  const finish = () => { $("btnAnalyze").disabled = false; $("btnDiarize").disabled = !state.lines.length; $("anaProgress").hidden = true; };
   worker.onmessage = async (e) => {
     const m = e.data;
     if (m.type === "progress" && m.p.status === "progress" && m.p.total) {
@@ -240,21 +313,27 @@ function analyze() {
       setStatus("anaStatus", `AIモデルをダウンロード中… ${(l / 1e6).toFixed(0)} / ${(t / 1e6).toFixed(0)}MB（初回のみ）`);
     } else if (m.type === "status") {
       setStatus("anaStatus", m.text);
-      if (m.text.startsWith("文字起こし")) showProgress("anaProgress", -1);
+      if (m.text.startsWith("文字起こし") || m.text.startsWith("話者を判別")) showProgress("anaProgress", -1);
     } else if (m.type === "done") {
       computeSpeech();
       state.lines = buildLines(m.chunks, state.speech, state.pcm.length / 16000);
-      $("btnAnalyze").disabled = false;
-      $("anaProgress").hidden = true;
-      setStatus("anaStatus", `完了：字幕 ${state.lines.length} 枚`);
+      let msg = `完了：字幕 ${state.lines.length} 枚`;
+      if (m.segments) msg += `・話者 ${applySpeakers(m.segments)} 人を判別（間違いは表の「話者」で直せます）`;
+      finish();
+      setStatus("anaStatus", msg);
+      await refresh(true);
+    } else if (m.type === "speakers") {
+      const n = applySpeakers(m.segments);
+      finish();
+      setStatus("anaStatus", `話者 ${n} 人を判別しました（間違いは表の「話者」で直せます）`);
       await refresh(true);
     } else if (m.type === "error") {
-      $("btnAnalyze").disabled = false;
-      $("anaProgress").hidden = true;
+      finish();
       setStatus("anaStatus", `エラー：${m.message}`, true);
     }
   };
-  worker.postMessage({ audio: state.pcm, model: $("selModel").value, device });
+  if (onlySpeakers) worker.postMessage({ type: "diarize", audio: state.pcm });
+  else worker.postMessage({ audio: state.pcm, model: $("selModel").value, device, speakers: $("chkSpeakers").checked });
 }
 
 // ---------------------------------------------------------------- model → view
@@ -276,6 +355,7 @@ async function refresh(rebuildTable) {
   $("cutSummary").textContent = `元の長さ ${fmt(src)} → カット後 ${fmt(total)}（${Math.round((1 - total / src) * 100)}% 短縮）`;
   if (rebuildTable) renderTable();
   for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = !state.segs.length;
+  $("btnDiarize").disabled = !state.lines.length;
   save();
   if (!state.playing) await seekTo(state.t);
 }
@@ -301,7 +381,7 @@ function renderTable() {
     const tr = document.createElement("tr");
     tr.dataset.id = l.id;
     tr.innerHTML = `<td class="time"><button class="mono"></button></td>
-      <td><textarea rows="2"></textarea></td>
+      <td class="sub"><select class="sp-sel"></select><textarea rows="2"></textarea></td>
       <td class="fx"><select class="fx-type">${opts}</select><input type="text" placeholder="空なら字幕と同じ">
         <label class="fx-pos">位置 <select>${posOpts}</select></label></td>
       <td class="scr"><select>${scrOpts}</select></td>
@@ -313,6 +393,12 @@ function renderTable() {
     bt.onclick = () => seekTo(srcToOut(state.segs, l.src[0]) + 0.01);
     ta.value = l.text;
     ta.oninput = () => { l.text = ta.value; scheduleRefresh(); };
+    // 話者（1人だけのときは隠す）
+    const spSel = tr.querySelector(".sp-sel");
+    for (const sp of speakers()) spSel.appendChild(Object.assign(document.createElement("option"), { value: sp.id, textContent: sp.name }));
+    spSel.value = speakers().some((s) => s.id === l.speaker) ? l.speaker : speakers()[0].id;
+    spSel.hidden = speakers().length <= 1;
+    spSel.onchange = () => { l.speaker = spSel.value; scheduleRefresh(); };
     const syncFx = () => {
       const on = !!FX[l.fx]?.style;
       inp.hidden = pos.parentElement.hidden = !on;
@@ -335,7 +421,7 @@ function renderTable() {
 }
 
 function highlightRow() {
-  const cur = state.items?.find((it) => it.style === "subtitle" && state.t >= it.t && state.t < it.t + it.d);
+  const cur = state.items?.find((it) => it.style.startsWith("subtitle") && state.t >= it.t && state.t < it.t + it.d);
   for (const tr of $("lines").querySelectorAll("tbody tr[data-id]")) {
     const on = cur && tr.dataset.id === cur.line;
     if (on && !tr.classList.contains("current") && state.playing) tr.scrollIntoView({ block: "nearest" });
@@ -526,14 +612,20 @@ function save() {
   if (state.clips.length) try { localStorage.setItem(projectKey(), JSON.stringify(projectData())); } catch { /* 容量不足など */ }
 }
 function applyProject(p) {
-  const s = p.settings || {};
+  const { design: oldDesign, ...s } = p.settings || {};
+  // 話者ごとのデザイン。古い保存データ（デザイン1つだけ）は話者Aのデザインとして読み込む
+  const sps = (s.speakers && s.speakers.length ? s.speakers : [{ id: "A", name: "話者A", design: oldDesign || speakers()[0].design }])
+    .map((sp) => ({ id: sp.id, name: sp.name || `話者${sp.id}`, design: normalizeDesign(sp.design) }));
   state.settings = {
     ...state.settings,
     ...s,
-    design: normalizeDesign(s.design || state.settings.design),
+    speakers: sps,
     audio: { ...state.settings.audio, ...(s.audio || {}) },
   };
+  if (!sps.some((sp) => sp.id === state.editSpeaker)) state.editSpeaker = sps[0].id;
   state.lines = p.lines || [];
+  renderSpeakerBar();
+  refreshDesignPanel();
   $("inpTitle").value = state.settings.title;
   $("selLayout").value = state.settings.layout;
   $("inpGap").value = state.settings.gap;
@@ -577,7 +669,8 @@ for (const el of [$("dropzone"), document.querySelector(".phone")]) {
     addFiles(e.dataTransfer.files);
   });
 }
-$("btnAnalyze").onclick = analyze;
+$("btnAnalyze").onclick = () => analyze(false);
+$("btnDiarize").onclick = () => analyze(true);
 $("btnPlay").onclick = () => (state.playing ? stop() : play());
 $("seek").oninput = (e) => seekTo(Number(e.target.value));
 $("selAspect").onchange = async (e) => {
@@ -605,21 +698,48 @@ $("btnAddLine").onclick = async () => {
 $("btnExport").onclick = doExport;
 
 // 字幕デザイン：保存・読み込み・標準にする・初期に戻す
-const setDesign = (d) => { state.settings.design = normalizeDesign(d); refreshDesignPanel(); designChanged(); };
-$("btnDesignSave").onclick = () => download(new Blob([JSON.stringify(state.settings.design, null, 2)], { type: "application/json" }), "字幕デザイン.json");
+// 1人分のファイル = デザインそのもの / 全員分のファイル = { speakers: [{ name, design }] }
+const setDesign = (d) => { editingSpeaker().design = normalizeDesign(d); speakersChanged(); };
+const json = (o) => new Blob([JSON.stringify(o, null, 2)], { type: "application/json" });
+$("btnDesignSave").onclick = () => download(json(editingSpeaker().design), `字幕デザイン_${editingSpeaker().name}.json`);
+$("btnDesignSaveAll").onclick = () => download(json({ speakers: speakers().map(({ id, name, design }) => ({ id, name, design })) }), "字幕デザイン_全員.json");
 $("inpDesign").onchange = async (e) => {
   const f = e.target.files[0];
   e.target.value = "";
   if (!f) return;
-  try { setDesign(JSON.parse(await f.text())); setStatus("designStatus", `「${f.name}」を読み込みました。`); }
-  catch { setStatus("designStatus", "デザインのファイルを読み込めませんでした。", true); }
+  try {
+    const data = JSON.parse(await f.text());
+    if (Array.isArray(data.speakers)) {
+      // 全員分: 名前・順番もファイルのとおりにする（字幕に付けた話者は順番で対応させる）
+      const old = speakers().map((s) => s.id);
+      state.settings.speakers = data.speakers.map((sp, i) => ({ id: "ABCDEFGHIJ"[i], name: sp.name || `話者${"ABCDEFGHIJ"[i]}`, design: normalizeDesign(sp.design) }));
+      for (const l of state.lines) if (l.speaker) { const i = old.indexOf(l.speaker); l.speaker = state.settings.speakers[Math.min(Math.max(i, 0), state.settings.speakers.length - 1)].id; }
+      state.editSpeaker = state.settings.speakers[0].id;
+      speakersChanged();
+    } else setDesign(data);
+    setStatus("designStatus", `「${f.name}」を読み込みました。`);
+  } catch { setStatus("designStatus", "デザインのファイルを読み込めませんでした。", true); }
 };
 $("btnDesignDefault").onclick = () => {
-  localStorage.setItem(DESIGN_KEY, JSON.stringify(state.settings.design));
-  setStatus("designStatus", "このデザインを、新しく始める作業の標準にしました。");
+  localStorage.setItem(DESIGN_KEY, JSON.stringify(editingSpeaker().design));
+  setStatus("designStatus", `${editingSpeaker().name}のデザインを、新しく始める作業の標準にしました。`);
+};
+$("inpSpeakerName").oninput = (e) => {
+  editingSpeaker().name = e.target.value || editingSpeaker().id;
+  renderSpeakerBar();
+  renderTable();
+  save();
+};
+$("btnSpeakerDelete").onclick = () => {
+  const sp = editingSpeaker();
+  if (speakers().length <= 1 || !confirm(`${sp.name}を削除しますか？（この話者の字幕は${speakers()[0].id === sp.id ? speakers()[1].name : speakers()[0].name}になります）`)) return;
+  state.settings.speakers = speakers().filter((s) => s !== sp);
+  for (const l of state.lines) if (l.speaker === sp.id) l.speaker = speakers()[0].id;
+  state.editSpeaker = speakers()[0].id;
+  speakersChanged();
 };
 $("btnDesignReset").onclick = () => {
-  if (!confirm("字幕のデザインを初期設定に戻しますか？")) return;
+  if (!confirm(`${editingSpeaker().name}の字幕デザインを初期設定に戻しますか？`)) return;
   setDesign(DEFAULT_DESIGN);
   setStatus("designStatus", "初期設定に戻しました。");
 };

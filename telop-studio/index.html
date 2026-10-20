@@ -72,6 +72,10 @@
         </label>
         <button id="btnAnalyze" class="primary" disabled>解析する</button>
       </div>
+      <div class="row speaker-opt">
+        <label class="check"><input id="chkSpeakers" type="checkbox"> 話者も自動で分ける（2〜3人の会話向け）</label>
+        <button id="btnDiarize" class="ghost small" type="button" disabled title="文字起こしはそのままで、話者の判別だけやり直します">話者だけ分け直す</button>
+      </div>
       <div class="progress" hidden id="anaProgress"><div></div></div>
       <p class="status" id="anaStatus">音声は外部に送信されず、このパソコンの中だけで処理されます。</p>
       <label class="slider">間の詰め具合 <span id="gapVal" class="mono">0.30秒</span>
@@ -96,9 +100,16 @@
     <details class="card" id="stepDesign">
       <summary><h2><span class="num">4</span>字幕のデザイン</h2><span class="hint">クリックで開く</span></summary>
       <p class="hint">Premiere のエッセンシャルグラフィックスと同じ考え方で、数値で指定できます。マニュアルの指定に合わせて入力し、「デザインを保存」したファイルを配れば、全員が同じデザインで作れます。</p>
+      <div class="speaker-bar">
+        <div id="speakerBar" class="sp-tabs"></div>
+        <label class="sp-name">名前 <input id="inpSpeakerName" type="text" maxlength="20"></label>
+        <button id="btnSpeakerDelete" class="ghost small" type="button">この話者を削除</button>
+      </div>
+      <p class="hint">話者ごとに別のデザインにできます。上で話者を選んでから下の項目を変えてください。</p>
       <div id="designPanel" class="design-panel"></div>
       <div class="row design-actions">
-        <button id="btnDesignSave" class="ghost small" type="button">デザインを保存</button>
+        <button id="btnDesignSave" class="ghost small" type="button">この話者のデザインを保存</button>
+        <button id="btnDesignSaveAll" class="ghost small" type="button">全員分を保存</button>
         <label class="ghost button small">デザインを読み込む<input id="inpDesign" type="file" accept=".json" hidden></label>
         <button id="btnDesignDefault" class="ghost small" type="button">新しい作業の標準にする</button>
         <button id="btnDesignReset" class="ghost small" type="button">初期設定に戻す</button>

@@ -359,6 +359,7 @@ class TextItem {
     this.block = new Block(st, text);
   }
   width() { return this.block.contentW; }
+  center() { return this.pos[0]; }
   shift(dx) { this.pos[0] += dx; }
   draw(ctx, t, d) {
     drawBlock(ctx, this.block.compose(t), this.pos[0], this.pos[1], blockState(this.st, t, d), this.st.rotate);
@@ -377,6 +378,7 @@ class GroupItem {
     this.total = total;
   }
   width() { return this.total; }
+  center() { return (this.labelX - this.label.contentW / 2 + this.bodyX + this.body.contentW / 2) / 2; }
   shift(dx) { this.labelX += dx; this.bodyX += dx; }
   draw(ctx, t, d) {
     const bd = this.st.body_delay || 0;
@@ -455,10 +457,14 @@ export async function makeItem(it, styles, W, H, fps) {
   const pos = [...(it.pos || st.pos || [W / 2, H / 2])];
   const item = st.group ? new GroupItem(st, styles, it.label || "", it.text, pos) : new TextItem(st, it.text, pos);
   // 左上・右上に置くときは、テロップの端を指定位置にそろえる
-  if (it.align === "left" || it.align === "right") {
-    const w = item.width();
-    const dx = it.align === "left" ? w / 2 : -w / 2;
-    item.shift(dx);
+  const w = item.width();
+  if (it.align === "left" || it.align === "right") item.shift(it.align === "left" ? w / 2 : -w / 2);
+  // 画面の外にはみ出さないように内側へ寄せる（字幕を左右に寄せたとき用）
+  const cx = item.center();
+  const margin = 24;
+  if (w < W - 2 * margin) {
+    if (cx - w / 2 < margin) item.shift(margin - (cx - w / 2));
+    else if (cx + w / 2 > W - margin) item.shift(W - margin - (cx + w / 2));
   }
   return item;
 }
