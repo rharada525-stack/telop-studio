@@ -7,6 +7,7 @@ import {
 import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
 import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
+import { autoEdit, describe } from "./autoedit.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -228,6 +229,7 @@ async function clipsChanged(fromAdd) {
   }
   state.lines = [];
   state.t = 0;
+  $("btnUndoAuto").hidden = true; // 素材が変わったら、おまかせ編集の「元に戻す」は使えない
   const saved = localStorage.getItem(projectKey());
   if (saved) {
     applyProject(JSON.parse(saved));
@@ -317,7 +319,7 @@ function analyze(onlySpeakers = false) {
     } else if (m.type === "done") {
       computeSpeech();
       state.lines = buildLines(m.chunks, state.speech, state.pcm.length / 16000);
-      let msg = `完了：字幕 ${state.lines.length} 枚`;
+      let msg = `完了：字幕 ${state.lines.length} 枚。下の「✨ おまかせ編集」で演出を自動で付けられます`;
       if (m.segments) msg += `・話者 ${applySpeakers(m.segments)} 人を判別（間違いは表の「話者」で直せます）`;
       finish();
       setStatus("anaStatus", msg);
@@ -356,6 +358,7 @@ async function refresh(rebuildTable) {
   if (rebuildTable) renderTable();
   for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = !state.segs.length;
   $("btnDiarize").disabled = !state.lines.length;
+  $("btnAuto").disabled = !state.lines.length;
   save();
   if (!state.playing) await seekTo(state.t);
 }
@@ -696,6 +699,25 @@ $("btnAddLine").onclick = async () => {
   await refresh(true);
 };
 $("btnExport").onclick = doExport;
+
+// おまかせ編集（押す前の状態を覚えておき、「元に戻す」で戻せる）
+let beforeAuto = null;
+$("btnAuto").onclick = async () => {
+  stop();
+  beforeAuto = structuredClone(state.lines);
+  const n = autoEdit(state.lines, { strength: $("selStrength").value, speakers: speakers() });
+  await refresh(true);
+  setStatus("autoStatus", `付けた演出：${describe(n)}。気に入らない行は表で直すか、「元に戻す」で戻せます。`);
+  $("btnUndoAuto").hidden = false;
+};
+$("btnUndoAuto").onclick = async () => {
+  if (!beforeAuto) return;
+  state.lines = beforeAuto;
+  beforeAuto = null;
+  $("btnUndoAuto").hidden = true;
+  await refresh(true);
+  setStatus("autoStatus", "おまかせ編集の前に戻しました。");
+};
 
 // 字幕デザイン：保存・読み込み・標準にする・初期に戻す
 // 1人分のファイル = デザインそのもの / 全員分のファイル = { speakers: [{ name, design }] }

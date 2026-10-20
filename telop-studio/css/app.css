@@ -94,6 +94,16 @@ tr.current td { background: #2b2230; }
 tr.is-cut td { opacity: .45; }
 tr.is-cut textarea { text-decoration: line-through; }
 
+/* おまかせ編集 */
+.auto-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
+  border-radius: 10px; background: linear-gradient(90deg, #3a2030, #2a2440); border: 1px solid #5a3550; }
+.auto-btn { border: 0; border-radius: 99px; padding: 10px 22px; font-weight: 900; font-size: 15px; color: #fff; cursor: pointer;
+  background: linear-gradient(90deg, #ff4766, #ff9a3d); box-shadow: 0 4px 14px #ff476655; }
+.auto-btn:disabled { opacity: .4; cursor: default; box-shadow: none; }
+.auto-bar label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.auto-bar .ghost.small { margin-top: 0; }
+.auto-bar .status { flex: 1 1 100%; margin: 0; }
+
 /* 話者 */
 .speaker-opt { margin-top: 10px; align-items: center; }
 .speaker-opt label.check { flex: 1; flex-direction: row; align-items: center; color: var(--text); font-size: 13px; }

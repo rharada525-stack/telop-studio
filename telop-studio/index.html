@@ -87,6 +87,18 @@
 
     <div class="card grow" id="step3">
       <h2><span class="num">3</span>テロップを直す</h2>
+      <div class="auto-bar">
+        <button id="btnAuto" class="auto-btn" type="button" disabled>✨ おまかせ編集</button>
+        <label>強さ
+          <select id="selStrength">
+            <option value="low">控えめ</option>
+            <option value="mid" selected>標準</option>
+            <option value="high">派手</option>
+          </select>
+        </label>
+        <button id="btnUndoAuto" class="ghost small" type="button" hidden>元に戻す</button>
+        <p class="status" id="autoStatus">字幕の言葉から、見出し・ツッコミ・ズーム・強調色などを自動で付けます。手で設定した行はそのままです。</p>
+      </div>
       <p class="hint">文字は直接書き換えられます。<b>{ }</b> で囲むと強調色。演出を選んで文字を空のままにすると、その字幕自体が演出テロップになります。「画面効果」は演出なしの行にも付けられます。「カット」にチェックすると、その部分の映像ごと削除します。</p>
       <div class="table-wrap">
         <table id="lines">
