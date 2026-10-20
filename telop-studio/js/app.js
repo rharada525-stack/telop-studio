@@ -157,6 +157,8 @@ function applyFormat() {
   canvas.width = renderer.W;
   canvas.height = renderer.H;
   document.body.classList.toggle("landscape", a === "landscape");
+  // おまかせ編集の向きは、手で選んでいなければ出力の形に合わせる（縦→ショート、横→長尺）
+  if (!$("selMode").dataset.touched) $("selMode").value = a === "landscape" ? "long" : "short";
   $("selAspect").value = a;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -737,11 +739,12 @@ let beforeAuto = null;
 $("btnAuto").onclick = async () => {
   stop();
   beforeAuto = structuredClone(state.lines);
-  const n = autoEdit(state.lines, { strength: $("selStrength").value, speakers: speakers() });
+  const n = autoEdit(state.lines, { mode: $("selMode").value, strength: $("selStrength").value, speakers: speakers() });
   await refresh(true);
   setStatus("autoStatus", `付けた演出：${describe(n)}。気に入らない行は表で直すか、「元に戻す」で戻せます。`);
   $("btnUndoAuto").hidden = false;
 };
+$("selMode").onchange = (e) => { e.target.dataset.touched = "1"; };
 $("btnUndoAuto").onclick = async () => {
   if (!beforeAuto) return;
   state.lines = beforeAuto;
