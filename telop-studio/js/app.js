@@ -5,6 +5,7 @@ import {
   totalDuration, srcToOut, outToSrc, toSrt, FX,
 } from "./timeline.js";
 import { mixAudio, exportMp4 } from "./export.js";
+import { openMedia, decodeAudioTrack } from "./decode.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -54,10 +55,29 @@ async function loadVideo(file) {
   $("fileLabel").textContent = `${file.name}（${(file.size / 1e6).toFixed(1)}MB）`;
   $("dropzone").classList.add("loaded");
   $("dropHint").hidden = true;
+  if (video.src) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(file);
-  await new Promise((r) => video.addEventListener("loadeddata", r, { once: true }));
-  setStatus("anaStatus", "音声を読み込み中…");
-  state.audio = await decodeAudio(file);
+  await Promise.race([
+    new Promise((r) => video.addEventListener("loadeddata", r, { once: true })),
+    new Promise((r) => setTimeout(r, 8000)),
+  ]);
+  setStatus("anaStatus", "動画を読み込み中…");
+  try {
+    // MP4/MOV は必要な部分だけ少しずつ読む（数GBでもOK）
+    state.media = await openMedia(file);
+    if (state.media && !state.media.audio) throw new Error("音声の入っていない動画です。");
+    if (state.media) {
+      state.audio = await decodeAudioTrack(state.media, (p) => setStatus("anaStatus", `音声を読み込み中… ${Math.round(p * 100)}%`));
+    } else if (file.size > 800e6) {
+      throw new Error("この形式の大きいファイルには対応していません。MP4 か MOV で書き出した素材を使ってください。");
+    } else {
+      state.audio = await decodeAudio(file);
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus("anaStatus", `読み込めませんでした：${e.message}`, true);
+    return;
+  }
   const pcm = await toMono16k(state.audio);
   state.db = loudness(pcm);
   state.pcm = pcm;
@@ -257,7 +277,7 @@ async function doExport() {
     const audio = await mixAudio(state.audio, state.segs, renderer.sfxEvents(), sfxBuffers);
     setStatus("expStatus", "書き出し中…");
     const blob = await exportMp4({
-      file: state.file, video, segs: state.segs, renderer, layout: state.settings.layout, audio,
+      media: state.media, video, segs: state.segs, renderer, layout: state.settings.layout, audio,
       onProgress: (p) => { showProgress("expProgress", p); setStatus("expStatus", `書き出し中… ${Math.round(p * 100)}%`); },
     });
     download(blob, state.file.name.replace(/\.[^.]+$/, "") + "_telop.mp4");

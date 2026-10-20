@@ -2,7 +2,7 @@
 import { Muxer, ArrayBufferTarget } from "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.mjs";
 import { W, H, FPS } from "./render.js";
 import { totalDuration, outToSrc } from "./timeline.js";
-import { openMp4, FrameReader } from "./decode.js";
+import { FrameReader } from "./decode.js";
 
 const SR = 48000;
 
@@ -55,7 +55,7 @@ const waitSeek = (video, t) =>
   });
 
 // 動画は各区間を等倍で再生しながらフレームを取り込む（シークを最小限にして速くする）
-export async function exportMp4({ file, video, segs, renderer, layout, audio, onProgress, signal }) {
+export async function exportMp4({ media, video, segs, renderer, layout, audio, onProgress, signal }) {
   const vcfg = await pickVideoCodec();
   const { cfg: acfg, mux } = await pickAudioCodec();
   const target = new ArrayBufferTarget();
@@ -88,10 +88,10 @@ export async function exportMp4({ file, video, segs, renderer, layout, audio, on
   const canvas = Object.assign(document.createElement("canvas"), { width: W, height: H });
   const ctx = canvas.getContext("2d");
   const total = totalDuration(segs);
-  const src = file ? await openMp4(file).catch((e) => { throw e; }) : null;
-  if (src) {
-    // MP4/MOV: 直接デコード（速い・タブが裏でも止まらない）
-    const reader = new FrameReader(src);
+  if (media) {
+    // MP4/MOV: 必要な部分だけ読んで直接デコード（速い・タブが裏でも止まらない・数GBでもOK）
+    const src = media.video;
+    const reader = new FrameReader(media);
     try {
       const nFrames = Math.round(total * FPS);
       for (let n = 0; n < nFrames; n++) {

@@ -3,6 +3,9 @@ short-template/output/
 __pycache__/
 *.pyc
 
+# Claude Code のローカル設定（このPCのパスが入るため）
+.claude/
+
 # エディタ・OS
 .DS_Store
 Thumbs.db
