@@ -237,7 +237,20 @@ export const FX = {
   point: { name: "見出し「その1/本文」", style: "point", pos: { portrait: "auto", landscape: "tl" }, screen: "none" },
   reveal: { name: "オチ", style: "reveal", pos: { portrait: "auto", landscape: "center" }, screen: "flash" },
   cta_main: { name: "締め", style: "cta_main", pos: { portrait: "auto", landscape: "bottom" }, screen: "none" },
+  vertical: { name: "縦書き（大）", style: "vertical_big", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  quote: { name: "白箱（問いかけ・引用）", style: "box_quote", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  biz: { name: "ビジネス強調（2色）", style: "biz_emph", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  corner: { name: "コーナー名（左上）", style: "corner_label", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  next: { name: "この後（右上）", style: "next_preview", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  hand: { name: "手書き風", style: "handwrite", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  horror: { name: "ホラー・不穏", style: "horror", pos: { portrait: "auto", landscape: "auto" }, screen: "dark" },
+  note: { name: "注釈（※小さく）", style: "note", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  name: { name: "名前テロップ", style: "name_plate", pos: { portrait: "auto", landscape: "auto" }, screen: "none" },
+  brush: { name: "筆文字タイトル", style: "brush_title", pos: { portrait: "auto", landscape: "auto" }, screen: "lines" },
 };
+
+// 長く出しておく演出（次の同じ種類が出るまで表示）
+const PERSIST = new Set(["point", "corner"]);
 
 export const FX_POS = {
   auto: "おまかせ", tl: "左上", top: "上", tr: "右上", center: "真ん中", bottom: "下（字幕の位置）",
@@ -312,16 +325,21 @@ export function buildItems(lines, segs, settings) {
 
     let d = Math.max(1.4, end - t0);
     if (fx && fx.style) {
-      const text = ownText || l.text;
+      // デザインセットで演出の見た目を差し替える（例：ビジネス講義風なら「キーワード」→ 2色の大きい強調）
+      const style = settings.fxMap?.[l.fx] || fx.style;
+      const vertical = style === "vertical_big";
+      // 字幕そのものを演出にするときは、強調色を付けて読みやすい長さで改行する
+      let text = ownText || wrapLine(shown, vertical ? 7 : aspect === "landscape" ? 18 : 10);
       if (l.fx === "reveal") d += 0.8;
-      if (l.fx === "point") {
-        const nextPoint = live.slice(i + 1).find((x) => x.l.fx === "point");
-        d = (nextPoint ? nextPoint.t0 : total) - t0;
+      if (PERSIST.has(l.fx)) {
+        const nextSame = live.slice(i + 1).find((x) => x.l.fx === l.fx);
+        d = (nextSame ? nextSame.t0 : total) - t0;
       }
-      const it = { style: fx.style, text, t: t0, d, line: l.id };
+      const it = { style, text, t: t0, d, line: l.id };
       if (l.fx === "point") {
         const [label, ...body] = text.split(/[/／]/);
-        Object.assign(it, body.length ? { label, text: body.join("/") } : { label: "POINT", text });
+        if (style === "point") Object.assign(it, body.length ? { label, text: body.join("/") } : { label: "POINT", text });
+        else it.text = body.length ? `${label}　${body.join("/")}` : text; // 見出しを1行のラベルで出すデザインのとき
       }
       const posKey = !l.fxPos || l.fxPos === "auto" ? fx.pos?.[aspect] : l.fxPos;
       Object.assign(it, placeFor(posKey, aspect, replaces, design?.pos?.[aspect] || [0, 0]));
@@ -329,7 +347,7 @@ export function buildItems(lines, segs, settings) {
     }
     // 画面効果（演出なしの行にも付けられる）
     const effect = !l.screen || l.screen === "auto" ? fx?.screen || "none" : l.screen;
-    const effDur = fx && fx.style && l.fx !== "point" ? d : end - t0;
+    const effDur = fx && fx.style && !PERSIST.has(l.fx) ? d : end - t0;
     items.push(...screenItems(effect, t0, effDur));
   });
   return items.map((it) => ({ ...it, d: Math.min(it.d, total - it.t) })).filter((it) => it.d > 0.05);

@@ -30,9 +30,9 @@ const PROFILES = {
     high: { hook: true, react: true, zoomGap: 2, numberFx: true, question: true, exclaim: true, negative: "mono_dark", lines: true, topic: false, laughFx: true, shake: true },
   },
   long: {
-    low: { hook: false, react: false, zoomGap: Infinity, numberFx: false, question: false, exclaim: false, negative: "none", lines: false, topic: true, laughFx: true, shake: false },
-    mid: { hook: false, react: true, zoomGap: 8, numberFx: false, question: false, exclaim: false, negative: "dark", lines: false, topic: true, laughFx: true, shake: false },
-    high: { hook: true, react: true, zoomGap: 5, numberFx: false, question: false, exclaim: true, negative: "dark", lines: false, topic: true, laughFx: true, shake: true },
+    low: { hook: false, react: false, zoomGap: Infinity, numberFx: false, question: false, exclaim: false, negative: "none", lines: false, topic: true, laughFx: true, shake: false, strongFx: 8 },
+    mid: { hook: false, react: true, zoomGap: 8, numberFx: false, question: false, exclaim: false, negative: "dark", lines: false, topic: true, laughFx: true, shake: false, strongFx: 4 },
+    high: { hook: true, react: true, zoomGap: 5, numberFx: false, question: false, exclaim: true, negative: "dark", lines: false, topic: true, laughFx: true, shake: true, strongFx: 3 },
   },
 };
 
@@ -64,7 +64,7 @@ function enumNumber(head, fallback) {
 // lines を書き換えて、付けた内容の件数を返す
 export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [] } = {}) {
   const P = (PROFILES[mode] || PROFILES.short)[strength] || PROFILES.short.mid;
-  const n = { cut: 0, hook: 0, point: 0, topic: 0, summary: 0, react: 0, laugh: 0, reveal: 0, cta: 0, zoom: 0, dark: 0, accent: 0, keyword: 0 };
+  const n = { cut: 0, hook: 0, point: 0, topic: 0, summary: 0, react: 0, laugh: 0, reveal: 0, cta: 0, zoom: 0, dark: 0, accent: 0, keyword: 0, quote: 0 };
   let pointNo = 0, topicNo = 0;
   let lastFx = -10;   // 演出を付けた行番号（詰め込みすぎないように間をあける）
   let lastZoom = -10; // ズーム系だけは別に間隔を見る
@@ -185,6 +185,19 @@ export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [
       continue;
     }
 
+    // 11b) 問いかけ（ショート）→ 黒枠の白い箱で見せる
+    if (P.question && QUESTION.test(t) && t.length <= 24 && i - lastFx >= 2) {
+      set("quote", "", canZoom ? "zoom" : null, "quote");
+      if (canZoom) lastZoom = i;
+      continue;
+    }
+
+    // 11c) 長尺の要点（強い言葉・数字）→ 字幕を大きな強調テロップに（デザインセットで見た目が変わる）
+    if (P.strongFx && (STRONG.test(t) || num) && i - lastFx >= P.strongFx) {
+      set("keyword", "", null, "keyword");
+      continue;
+    }
+
     // 12) 強い言葉・問いかけ・驚き → ズーム
     if (canZoom && (STRONG.test(t) || (P.question && QUESTION.test(t)) || (P.exclaim && EXCLAIM.test(t)))) {
       zoom(P.lines && STRONG.test(t) ? "zoom_lines" : "zoom");
@@ -205,7 +218,7 @@ export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [
 export function describe(n) {
   const parts = [
     [n.hook, "つかみ"], [n.point, "見出し"], [n.topic, "話題の見出し"], [n.summary, "まとめ"], [n.react, "ツッコミ"],
-    [n.laugh, "（笑）"], [n.reveal, "オチ"], [n.keyword, "キーワード"], [n.cta, "締め"], [n.zoom, "ズーム"],
+    [n.laugh, "（笑）"], [n.reveal, "オチ"], [n.keyword, "キーワード・要点"], [n.quote, "問いかけの白箱"], [n.cta, "締め"], [n.zoom, "ズーム"],
     [n.dark, "暗転"], [n.cut, "つなぎ言葉のカット"],
   ].filter(([c]) => c).map(([c, s]) => `${s}${c}`);
   return parts.length ? parts.join("・") : "付けられる演出が見つかりませんでした";

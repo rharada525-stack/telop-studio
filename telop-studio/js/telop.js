@@ -59,17 +59,24 @@ function paintStyle(ctx, paint, y0, y1, box) {
   return g;
 }
 
+// { } = 強調色1、[ ] = 強調色2。返す値: 行ごとの [文字, 強調の種類(0/1/2)]
 function parseMarkup(text) {
   const lines = [[]];
-  let acc = false;
+  let acc = 0;
   for (const ch of text) {
-    if (ch === "{") acc = true;
-    else if (ch === "}") acc = false;
+    if (ch === "{") acc = 1;
+    else if (ch === "[") acc = 2;
+    else if (ch === "}" || ch === "]") acc = 0;
     else if (ch === "\n") lines.push([]);
     else lines[lines.length - 1].push([ch, acc]);
   }
   return lines;
 }
+
+// 縦書きで90度回す文字・位置をずらす文字
+const V_ROTATE = new Set([..."ー〜～…‥—―－-=~（）()「」『』【】［］〈〉《》｛｝<>＜＞：:；;"]);
+const V_PUNCT = new Set([..."、。，．,."]);
+const V_SMALL = new Set([..."ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ"]);
 
 // ---------------------------------------------------------------- plate (座布団)
 function renderPlate(pl, box) {
@@ -141,41 +148,72 @@ export class Block {
     let size = st.size;
     const lines = parseMarkup(text);
     const trkEm = st.tracking || 0;
-    const lineW = (line, size) => {
-      measureCtx.font = fontCss(st, size);
-      return line.reduce((a, [c]) => a + measureCtx.measureText(c).width, 0) + trkEm * size * Math.max(0, line.length - 1);
-    };
-    if (st.max_width) {
-      const w = Math.max(...lines.map((l) => lineW(l, size)));
-      if (w > st.max_width) size = Math.floor((size * st.max_width) / w);
-    }
-    this.size = size;
-    const font = fontCss(st, size);
-    const lh = size * (st.line_spacing || 1.15);
+    const accScale = st.accent_scale || 1; // 強調部分だけ大きくする倍率
+    const sz = (acc) => (acc ? size * accScale : size);
     const strokes = st.strokes || [];
     const shadows = st.shadows || [];
     const maxsw = Math.max(0, ...strokes.map((s) => s.w));
     const m = 4 + maxsw + Math.max(0, ...shadows.map((s) => Math.abs(s.dx) + Math.abs(s.dy) + 3 * s.blur));
-    const textW = Math.max(...lines.map((l) => lineW(l, size)));
-    const cap = 0.88 * size, desc = 0.12 * size;
-    const textH = lh * (lines.length - 1) + cap + desc;
-
     this.glyphs = [];
-    lines.forEach((line, li) => {
-      const by = cap + li * lh;
-      let pen = (textW - lineW(line, size)) / 2;
-      for (const [ch, acc] of line) {
-        measureCtx.font = font;
-        const mt = measureCtx.measureText(ch);
-        if (ch.trim()) this.glyphs.push(this.makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc, textW));
-        pen += mt.width + trkEm * size;
+    let textW, textH;
+
+    if (st.vertical) {
+      // ---- 縦書き：右の列から左へ。文字は上から下へ
+      const colH = (line) => line.reduce((a, [, acc]) => a + sz(acc) * (1 + trkEm), 0);
+      const fit = Math.max(...lines.map(colH));
+      if (st.max_height && fit > st.max_height) size = Math.floor((size * st.max_height) / fit);
+      this.size = size;
+      const colGap = size * (st.line_spacing || 1.15);
+      textW = colGap * (lines.length - 1) + size * accScale;
+      textH = Math.max(...lines.map(colH));
+      lines.forEach((line, li) => {
+        const cx = textW - (size * accScale) / 2 - li * colGap;
+        let y = 0;
+        for (const [ch, acc] of line) {
+          const s = sz(acc);
+          const cy = y + s / 2;
+          if (ch.trim()) this.glyphs.push(this.makeGlyphV(ch, acc, s, cx, cy, m, maxsw, strokes, shadows, { x0: cx - s / 2, x1: cx + s / 2, y0: 0, y1: textH }));
+          y += s * (1 + trkEm);
+        }
+      });
+    } else {
+      // ---- 横書き
+      const lineW = (line, size) => line.reduce((a, [c, acc]) => {
+        measureCtx.font = fontCss(st, acc ? size * accScale : size);
+        return a + measureCtx.measureText(c).width;
+      }, 0) + trkEm * size * Math.max(0, line.length - 1);
+      if (st.max_width) {
+        const w = Math.max(...lines.map((l) => lineW(l, size)));
+        if (w > st.max_width) size = Math.floor((size * st.max_width) / w);
       }
-    });
+      this.size = size;
+      const lineHeight = (line) => Math.max(...line.map(([, acc]) => sz(acc)), size);
+      const lh = (line) => lineHeight(line) * (st.line_spacing || 1.15);
+      textW = Math.max(...lines.map((l) => lineW(l, size)));
+      let by = 0;
+      lines.forEach((line, li) => {
+        const big = lineHeight(line);
+        by += li === 0 ? 0.88 * big : lh(line);
+        let pen = (textW - lineW(line, size)) / 2;
+        for (const [ch, acc] of line) {
+          const s = sz(acc);
+          const font = fontCss(st, s);
+          measureCtx.font = font;
+          const mt = measureCtx.measureText(ch);
+          if (ch.trim()) this.glyphs.push(this.makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, 0.88 * s, 0.12 * s, textW, s));
+          pen += mt.width + trkEm * size;
+        }
+      });
+      textH = by + 0.12 * lineHeight(lines[lines.length - 1]);
+    }
 
     this.plate = null;
     if (st.plate) {
       const [px, py] = st.plate.pad || [30, 15];
-      this.content = [-px, -py, textW + px, textH + py];
+      // 画面幅いっぱいの帯（ビジネス系の字幕でよく使う）
+      this.content = st.plate.full && st._W
+        ? [textW / 2 - st._W / 2 - 2, -py, textW / 2 + st._W / 2 + 2, textH + py]
+        : [-px, -py, textW + px, textH + py];
       this.plate = renderPlate(st.plate, this.content);
     } else {
       this.content = [0, 0, textW, textH];
@@ -208,9 +246,8 @@ export class Block {
     this.charEnd = st.char ? (st.char_delay || 0) + (st.stagger || 0.03) * this.glyphs.length + CHAR_DUR[st.char] : 0;
   }
 
-  makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc, textW) {
+  makeGlyph(font, ch, acc, mt, pen, by, m, maxsw, strokes, shadows, cap, desc, textW, size) {
     // 描く範囲は測った大きさより広めにとる（測り方が少しずれても文字が切れて線が残らないように）
-    const size = this.size;
     const l = Math.min(-mt.actualBoundingBoxLeft, -0.2 * size) - maxsw;
     const r = Math.max(mt.actualBoundingBoxRight, mt.width + 0.2 * size) + maxsw;
     const t = Math.min(-mt.actualBoundingBoxAscent, -1.1 * size) - maxsw;
@@ -219,6 +256,37 @@ export class Block {
     const ox = m - l, oy = m - t;
     g.x = pen + l - m;
     g.y = by + t - m;
+    // グラデーションをかける範囲 = その行の文字全体（字ごとにバラバラにならないように）
+    const box = { x0: -g.x, x1: textW - g.x, y0: oy - cap, y1: oy + desc };
+    this.paintGlyph(g, font, ch, acc, (ctx) => ctx.fillText(ch, ox, oy), (ctx) => ctx.strokeText(ch, ox, oy), maxsw, strokes, shadows, box);
+    return g;
+  }
+
+  // 縦書きの1文字。cx, cy は文字の中心
+  makeGlyphV(ch, acc, size, cx, cy, m, maxsw, strokes, shadows, colBox) {
+    const font = fontCss(this.st, size);
+    const S = Math.ceil(size * 1.6 + 2 * (maxsw + m));
+    const g = { w: S, h: S, x: cx - S / 2, y: cy - S / 2 };
+    let dx = 0, dy = 0;
+    if (V_PUNCT.has(ch)) { dx = 0.32 * size; dy = -0.32 * size; }
+    else if (V_SMALL.has(ch)) { dx = 0.08 * size; dy = -0.08 * size; }
+    const rot = V_ROTATE.has(ch);
+    const place = (ctx) => {
+      ctx.translate(S / 2 + dx, S / 2 + dy);
+      if (rot) ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "center";
+    };
+    const base = 0.38 * size; // CJK の字面の中心とベースラインの差
+    const box = { x0: colBox.x0 - g.x, x1: colBox.x1 - g.x, y0: colBox.y0 - g.y, y1: colBox.y1 - g.y };
+    this.paintGlyph(g, font, ch, acc,
+      (ctx) => { ctx.save(); place(ctx); ctx.fillText(ch, 0, base); ctx.restore(); },
+      (ctx) => { ctx.save(); place(ctx); ctx.strokeText(ch, 0, base); ctx.restore(); },
+      maxsw, strokes, shadows, box);
+    return g;
+  }
+
+  // 影 → 境界線（外側から）→ 塗り の順に、1文字分の層を作る
+  paintGlyph(g, font, ch, acc, fill, stroke, maxsw, strokes, shadows, box) {
     const layer = (fn) => {
       const c = canvas(g.w, g.h);
       // 文字はCPUで描く（GPUで描くと、フォント読み込み直後に別の字の欠片が混ざることがある）
@@ -231,8 +299,8 @@ export class Block {
     };
     const shape = (ctx, w, style) => {
       ctx.fillStyle = style;
-      ctx.fillText(ch, ox, oy);
-      if (w > 0) { ctx.strokeStyle = style; ctx.lineWidth = 2 * w; ctx.strokeText(ch, ox, oy); }
+      fill(ctx);
+      if (w > 0) { ctx.strokeStyle = style; ctx.lineWidth = 2 * w; stroke(ctx); }
     };
     g.layers = [];
     for (const sh of shadows)
@@ -241,13 +309,11 @@ export class Block {
         ctx.translate(sh.dx, sh.dy);
         shape(ctx, maxsw, sh.color);
       }));
-    // グラデーションをかける範囲 = その行の文字全体（字ごとにバラバラにならないように）
-    const box = { x0: -g.x, x1: textW - g.x, y0: oy - cap, y1: oy + desc };
     for (const s of [...strokes].reverse())
       g.layers.push(layer((ctx) => shape(ctx, s.w, paintStyle(ctx, s.color, box.y0 - s.w, box.y1 + s.w, box))));
-    const fill = acc && this.st.accent ? this.st.accent : this.st.fill;
-    g.layers.push(layer((ctx) => shape(ctx, 0, paintStyle(ctx, fill, oy - cap, oy + desc, box))));
-    return g;
+    const st = this.st;
+    const fillPaint = acc === 2 && st.accent2 ? st.accent2 : acc && st.accent ? st.accent : st.fill;
+    g.layers.push(layer((ctx) => shape(ctx, 0, paintStyle(ctx, fillPaint, box.y0, box.y1, box))));
   }
 
   // 時刻 t のブロック画像（ブロック単位の変形は含まない）
@@ -292,7 +358,7 @@ export class Block {
 
 // ---------------------------------------------------------------- block-level animation
 export function blockState(st, t, d) {
-  let s = 1, rot = 0, dx = 0, dy = 0, op = 1;
+  let s = 1, rot = 0, dx = 0, dy = 0, op = 1, sx = 1, sy = 1, wipe = 1, wipeFrom = 0;
   const k = st.in || "none";
   if (k === "slam") {
     const p = clamp(t / 0.28);
@@ -326,12 +392,43 @@ export function blockState(st, t, d) {
     const p = clamp(t / 0.25);
     dy = (1 - easeOutCubic(p)) * 40;
     op = p;
+  } else if (k === "slide_right") { // 右からすべり込む
+    const p = clamp(t / 0.35);
+    dx = (1 - easeOutExpo(p)) * 900;
+    op = clamp(p * 3);
+  } else if (k === "slide_up") { // 下からすっと出る
+    const p = clamp(t / 0.3);
+    dy = (1 - easeOutCubic(p)) * 90;
+    op = clamp(p * 2.5);
+  } else if (k === "wipe") { // 左から右へ現れる
+    wipe = easeOutCubic(clamp(t / 0.35));
+  } else if (k === "bounce") { // ぴょんと弾んで出る
+    const p = clamp(t / 0.5);
+    dy = -(1 - easeOutBounce(p)) * 70;
+    s = 0.85 + 0.15 * easeOutBack(clamp(t / 0.2), 2);
+    op = clamp(p * 6);
+  } else if (k === "jelly") { // ぷるんと出る
+    const p = clamp(t / 0.6);
+    const w = Math.sin(t * 28) * (1 - p) * 0.22;
+    sx = 1 + w;
+    sy = 1 - w;
+    s = Math.max(0.02, easeOutBack(clamp(t / 0.18), 2));
+    op = clamp(t / 0.08);
+  } else if (k === "zoom_in") { // 小さい所からふわっと
+    const p = clamp(t / 0.4);
+    s = 0.55 + 0.45 * easeOutExpo(p);
+    op = clamp(p * 2);
   }
   const idle = st.idle || "none";
   if (idle === "pulse") s *= 1 + 0.028 * Math.sin((2 * Math.PI * t) / 0.9);
   else if (idle === "float") {
     dy += Math.sin((2 * Math.PI * t) / 1.4) * 7;
     rot += Math.sin((2 * Math.PI * t) / 2.1) * 1.8;
+  } else if (idle === "tremble") { // 小刻みに震える（ホラー・動揺）
+    dx += Math.sin(t * 71) * 2.5;
+    dy += Math.cos(t * 59) * 2.5;
+  } else if (idle === "wobble") { // ゆらゆら
+    rot += Math.sin((2 * Math.PI * t) / 1.2) * 3;
   }
   const od = st.out_d ?? 0.18;
   const q = od > 0 ? clamp((t - (d - od)) / od) : 0;
@@ -341,17 +438,26 @@ export function blockState(st, t, d) {
     else if (o === "zoom_out") { s *= 1 + 0.35 * easeInCubic(q); op *= 1 - q; }
     else if (o === "pop_out" || o === "shrink") { s *= Math.max(0.02, 1 - easeInBack(q, 2.2)); op *= 1 - q * q; }
     else if (o === "slide_out_left") dx -= easeInCubic(q) * 1200;
+    else if (o === "slide_out_right") dx += easeInCubic(q) * 1200;
+    else if (o === "wipe_out") { wipeFrom = easeInCubic(q); }
   }
-  return { s, rot, dx, dy, op };
+  return { s, rot, dx, dy, op, sx, sy, wipe, wipeFrom };
 }
 
 function drawBlock(ctx, img, x, y, bs, staticRot) {
-  if (bs.op <= 0.001) return;
+  if (bs.op <= 0.001 || bs.wipe <= 0.001 || bs.wipeFrom >= 0.999) return;
   ctx.save();
   ctx.globalAlpha = clamp(bs.op);
   ctx.translate(x + bs.dx, y + bs.dy);
   ctx.rotate(((bs.rot + (staticRot || 0)) * Math.PI) / 180);
-  ctx.scale(bs.s, bs.s);
+  ctx.scale(bs.s * (bs.sx ?? 1), bs.s * (bs.sy ?? 1));
+  if ((bs.wipe ?? 1) < 1 || (bs.wipeFrom ?? 0) > 0) {
+    // ワイプ：見せる範囲を左から広げる／左から消す
+    const x0 = -img.width / 2 + img.width * (bs.wipeFrom || 0);
+    ctx.beginPath();
+    ctx.rect(x0, -img.height / 2, img.width * Math.min(bs.wipe ?? 1, 1 - (bs.wipeFrom || 0)), img.height);
+    ctx.clip();
+  }
   ctx.drawImage(img, -img.width / 2, -img.height / 2);
   ctx.restore();
 }
@@ -364,8 +470,11 @@ class TextItem {
     this.block = new Block(st, text);
   }
   width() { return this.block.contentW; }
+  height() { return this.block.content[3] - this.block.content[1]; }
   center() { return this.pos[0]; }
+  centerY() { return this.pos[1]; }
   shift(dx) { this.pos[0] += dx; }
+  shiftY(dy) { this.pos[1] += dy; }
   draw(ctx, t, d) {
     drawBlock(ctx, this.block.compose(t), this.pos[0], this.pos[1], blockState(this.st, t, d), this.st.rotate);
   }
@@ -383,8 +492,11 @@ class GroupItem {
     this.total = total;
   }
   width() { return this.total; }
+  height() { return Math.max(...[this.label, this.body].map((b) => b.content[3] - b.content[1])); }
   center() { return (this.labelX - this.label.contentW / 2 + this.bodyX + this.body.contentW / 2) / 2; }
+  centerY() { return this.pos[1]; }
   shift(dx) { this.labelX += dx; this.bodyX += dx; }
+  shiftY(dy) { this.pos[1] += dy; }
   draw(ctx, t, d) {
     const bd = this.st.body_delay || 0;
     for (const [blk, x, t0] of [[this.body, this.bodyX, bd], [this.label, this.labelX, 0]]) {
@@ -486,16 +598,24 @@ export async function makeItem(it, styles, W, H, fps) {
   const chars = (it.label || "") + it.text;
   await ensureFonts(fonts.map((f) => fontCss(f, 100)), chars);
   const pos = [...(it.pos || st.pos || [W / 2, H / 2])];
-  const item = st.group ? new GroupItem(st, styles, it.label || "", it.text, pos) : new TextItem(st, it.text, pos);
+  // _W は「画面幅いっぱいの帯」を作るときに使う
+  const item = st.group ? new GroupItem(st, styles, it.label || "", it.text, pos) : new TextItem({ ...st, _W: W }, it.text, pos);
   // 左上・右上に置くときは、テロップの端を指定位置にそろえる
   const w = item.width();
-  if (it.align === "left" || it.align === "right") item.shift(it.align === "left" ? w / 2 : -w / 2);
+  const align = it.align || st.align;
+  if (align === "left" || align === "right") item.shift(align === "left" ? w / 2 : -w / 2);
   // 画面の外にはみ出さないように内側へ寄せる（字幕を左右に寄せたとき用）
   const cx = item.center();
   const margin = 24;
   if (w < W - 2 * margin) {
     if (cx - w / 2 < margin) item.shift(margin - (cx - w / 2));
     else if (cx + w / 2 > W - margin) item.shift(W - margin - (cx + w / 2));
+  }
+  // 上下も同じように画面の内側へ（2行になった強調テロップが下で切れないように）
+  const h = item.height(), cy = item.centerY();
+  if (h < H - 2 * margin) {
+    if (cy - h / 2 < margin) item.shiftY(margin - (cy - h / 2));
+    else if (cy + h / 2 > H - margin) item.shiftY(H - margin - (cy + h / 2));
   }
   return item;
 }

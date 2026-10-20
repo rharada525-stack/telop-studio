@@ -14,14 +14,16 @@ export const DEFAULT_DESIGN = {
   maxChars: { portrait: 13, landscape: 26 }, // 1行に入れる文字数の目安
   fill: paint("#ffffff"),
   accent: "#ffe14d", // { } で囲んだ文字の色
+  accent2: "#5ad1ff", // [ ] で囲んだ文字の色
+  accentScale: 100, // 強調部分の大きさ（%）
   strokes: [{ ...STROKE, color: "#121212", width: 9 }], // 境界線。先頭が一番内側（Premiere の「＋」で重ねるのと同じ）
   shadow: { on: true, color: "#000000", opacity: 55, angle: 180, distance: 5, blur: 6 },
-  plate: { on: false, color: "#000000", opacity: 60, padX: 28, padY: 12, radius: 10 },
+  plate: { on: false, full: false, color: "#000000", opacity: 60, padX: 28, padY: 12, radius: 10 },
   pos: { portrait: [540, 1390], landscape: [960, 950] },
   animation: "none", // none | fade | type | pop
 };
 
-export const WEB_FONTS = ["Noto Sans JP", "M PLUS Rounded 1c", "Zen Maru Gothic", "Dela Gothic One", "Kosugi Maru", "BIZ UDPGothic", "Noto Serif JP"];
+export const WEB_FONTS = ["Noto Sans JP", "M PLUS Rounded 1c", "Zen Maru Gothic", "Dela Gothic One", "Kosugi Maru", "BIZ UDPGothic", "Noto Serif JP", "Shippori Mincho B1", "Yusei Magic", "Yuji Boku"];
 
 const hexA = (hex, opacity) => hex.slice(0, 7) + Math.round((Math.max(0, Math.min(100, opacity)) / 100) * 255).toString(16).padStart(2, "0");
 
@@ -92,10 +94,12 @@ export function designToStyle(d, aspect) {
     max_width: aspect === "landscape" ? 1800 : 1000,
     fill: toPaint(d.fill),
     accent: d.accent,
+    accent2: d.accent2,
+    accent_scale: (Number(d.accentScale) || 100) / 100,
     strokes,
     shadows,
     plate: d.plate.on
-      ? { type: "round", radius: Number(d.plate.radius), fill: hexA(d.plate.color, d.plate.opacity), pad: [Number(d.plate.padX), Number(d.plate.padY)] }
+      ? { type: "round", radius: d.plate.full ? 0 : Number(d.plate.radius), full: !!d.plate.full, fill: hexA(d.plate.color, d.plate.opacity), pad: [Number(d.plate.padX), Number(d.plate.padY)] }
       : undefined,
     pos: d.pos[aspect],
     idle: "none",
@@ -124,6 +128,8 @@ const SECTIONS = [
     ["終わりの色", "fill.color2", "color", { when: "fill.gradient" }],
     ["角度", "fill.angle", "num", { min: 0, max: 360, unit: "° (0=上→下)", when: "fill.gradient" }],
     ["強調の色 { }", "accent", "color"],
+    ["強調の色2 [ ]", "accent2", "color"],
+    ["強調部分の大きさ", "accentScale", "num", { min: 50, max: 250, unit: "%" }],
   ]],
   "__strokes__",
   ["シャドウ", [
@@ -136,6 +142,7 @@ const SECTIONS = [
   ]],
   ["背景（座布団）", [
     ["使う", "plate.on", "check"],
+    ["画面幅いっぱいの帯", "plate.full", "check", { when: "plate.on" }],
     ["色", "plate.color", "color"],
     ["不透明度", "plate.opacity", "num", { min: 0, max: 100, unit: "%" }],
     ["余白（横）", "plate.padX", "num", { min: 0, max: 200, unit: "px" }],

@@ -9,6 +9,7 @@ import { openMedia, decodeAudioTrack } from "./decode.js";
 import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
 import { autoEdit, describe } from "./autoedit.js";
 import { buildPremierePackage } from "./premiere.js";
+import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -25,6 +26,8 @@ const state = {
   settings: {
     title: "", layout: "auto", gap: 0.3, aspect: "portrait",
     autoHighlight: true, // 字幕の大事な言葉を自動で強調色にする
+    designSet: "standard", // デザインセット
+    fxMap: {},             // デザインセットによる演出の見た目の差し替え
     speakers: [{ id: "A", name: "話者A", design: loadDefaultDesign() }], // 話者ごとの字幕デザイン
     audio: { voiceAuto: true, voice: 100, sfx: 40 },  // 音量（%）
   },
@@ -652,6 +655,8 @@ function applyProject(p) {
   refreshDesignPanel();
   $("inpTitle").value = state.settings.title;
   $("chkHighlight").checked = state.settings.autoHighlight !== false;
+  $("selSet").value = state.settings.designSet || "standard";
+  $("setNote").textContent = DESIGN_SETS[$("selSet").value]?.note || "";
   $("selLayout").value = state.settings.layout;
   $("inpGap").value = state.settings.gap;
   $("gapVal").textContent = `${Number(state.settings.gap).toFixed(2)}秒`;
@@ -764,6 +769,30 @@ $("btnAuto").onclick = async () => {
   $("btnUndoAuto").hidden = false;
 };
 $("selMode").onchange = (e) => { e.target.dataset.touched = "1"; };
+
+// デザインセット：字幕のデザイン（全話者）と、演出の見た目をまとめて切り替える
+$("selSet").onchange = (e) => {
+  const key = e.target.value;
+  const set = DESIGN_SETS[key];
+  if (!confirm(`「${set.name}」に切り替えます。字幕のデザインはセットの内容に置き換わります（演出の文字や位置はそのまま）。よろしいですか？`)) {
+    e.target.value = state.settings.designSet || "standard";
+    return;
+  }
+  speakers().forEach((sp, i) => {
+    sp.design = designOfSet(key);
+    // 2人目以降は境界線（なければ強調色）の色を変えて見分けやすくする
+    if (i > 0) {
+      if (sp.design.strokes.length) sp.design.strokes[0].color = SPEAKER_COLORS[i % SPEAKER_COLORS.length];
+      else sp.design.fill.color = ["#ffffff", "#bfe6ff", "#ffd1dc", "#d7ffcf"][i % 4];
+    }
+  });
+  state.settings.designSet = key;
+  state.settings.fxMap = { ...set.fxMap };
+  if (set.autoMode) { $("selMode").value = set.autoMode; $("selMode").dataset.touched = "1"; }
+  $("setNote").textContent = set.note;
+  speakersChanged();
+};
+$("setNote").textContent = DESIGN_SETS.standard.note;
 $("chkHighlight").onchange = (e) => { state.settings.autoHighlight = e.target.checked; refresh(false); };
 $("btnUndoAuto").onclick = async () => {
   if (!beforeAuto) return;

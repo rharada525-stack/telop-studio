@@ -112,6 +112,8 @@ tr.is-cut textarea { text-decoration: line-through; }
 .auto-bar .status { flex: 1 1 100%; margin: 0; }
 .auto-bar .hl-switch { flex: 1 1 100%; color: var(--text); font-size: 12px; }
 
+.set-note { color: var(--muted); font-size: 11px; line-height: 1.4; }
+
 /* 話者 */
 .speaker-opt { margin-top: 10px; align-items: center; }
 .speaker-opt label.check { flex: 1; flex-direction: row; align-items: center; color: var(--text); font-size: 13px; }

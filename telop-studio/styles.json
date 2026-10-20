@@ -13,6 +13,16 @@
     "reveal":           { "pos": [960, 480], "max_width": 1500, "size": 150 },
     "cta_main":         { "pos": [960, 470], "max_width": 1500, "size": 104 },
     "cta":              { "pos": [960, 760] },
+    "vertical_big":     { "size": 140, "max_height": 880, "pos": [330, 520] },
+    "box_quote":        { "pos": [960, 230], "max_width": 1400 },
+    "biz_emph":         { "size": 120, "max_width": 1780, "pos": [960, 940] },
+    "corner_label":     { "pos": [50, 150] },
+    "next_preview":     { "pos": [1870, 70] },
+    "handwrite":        { "pos": [1450, 560], "max_width": 800 },
+    "horror":           { "size": 130, "max_width": 1600, "pos": [960, 520] },
+    "note":             { "pos": [40, 1050] },
+    "name_plate":       { "pos": [50, 840] },
+    "brush_title":      { "size": 170, "max_width": 1600, "pos": [960, 500] },
     "speedlines":       { "center": [960, 520] },
     "speedlines_white": { "center": [960, 480] }
   },
@@ -137,6 +147,103 @@
     "pos": [540, 1220],
     "in": "pop", "out": "fade", "idle": "pulse",
     "sfx": "pikon", "sfx_offset": 0.05
+  },
+
+  "vertical_big": {
+    "z": 5, "family": "Shippori Mincho B1", "weight": 800, "size": 170, "vertical": true, "max_height": 1250, "line_spacing": 1.08,
+    "fill": "#111111", "accent": "#c8001e", "accent2": "#1d3fae",
+    "strokes": [ { "w": 9, "color": "#ffffff" }, { "w": 12, "color": "#111111" } ],
+    "shadows": [ { "dx": 0, "dy": 10, "blur": 14, "color": "#00000077" } ],
+    "pos": [300, 860],
+    "in": "none", "char": "pop", "stagger": 0.05, "out": "fade", "idle": "none",
+    "sfx": "pop", "sfx_offset": 0.0
+  },
+  "box_quote": {
+    "z": 6, "font": "NotoSansJP-Black.otf", "size": 62, "max_width": 900, "line_spacing": 1.12,
+    "fill": "#111111", "accent": "#c8001e", "accent2": "#1d3fae",
+    "strokes": [],
+    "plate": { "type": "round", "radius": 4, "fill": "#ffffff", "pad": [34, 20],
+               "stroke": { "w": 7, "color": "#111111" },
+               "shadow": { "dx": 10, "dy": 12, "blur": 0, "color": "#00000099" } },
+    "pos": [540, 430], "rotate": -3,
+    "in": "pop", "out": "pop_out", "idle": "none",
+    "sfx": "pikon", "sfx_offset": 0.0
+  },
+  "biz_emph": {
+    "z": 5, "font": "NotoSansJP-Black.otf", "size": 100, "max_width": 1000, "line_spacing": 1.05,
+    "fill": "#1d2b6e", "accent": "#e3171d", "accent2": "#0a8a3a",
+    "strokes": [ { "w": 9, "color": "#ffffff" }, { "w": 15, "color": "#0b0f2a" } ],
+    "shadows": [ { "dx": 0, "dy": 8, "blur": 8, "color": "#00000088" } ],
+    "pos": [540, 1380],
+    "in": "slide_up", "out": "fade", "out_d": 0.12, "idle": "none",
+    "sfx": null
+  },
+  "corner_label": {
+    "z": 7, "font": "NotoSansJP-Black.otf", "size": 44, "max_width": 700, "align": "left",
+    "fill": "#111111", "accent": "#e3171d",
+    "strokes": [],
+    "plate": { "type": "slant", "skew": 0.18, "fill": ["#ffffff", "#ececec"], "pad": [28, 12],
+               "bar": { "h": 6, "color": "#e3171d" },
+               "shadow": { "dx": 0, "dy": 6, "blur": 8, "color": "#00000066" } },
+    "pos": [50, 330],
+    "in": "wipe", "out": "wipe_out", "out_d": 0.25, "idle": "none",
+    "sfx": "whoosh", "sfx_offset": 0.0
+  },
+  "next_preview": {
+    "z": 7, "font": "NotoSansJP-Black.otf", "size": 40, "max_width": 640, "align": "right", "line_spacing": 1.2,
+    "fill": "#ffffff", "accent": "#ffe14d",
+    "strokes": [ { "w": 6, "color": "#111111" } ],
+    "shadows": [ { "dx": 0, "dy": 4, "blur": 6, "color": "#00000088" } ],
+    "pos": [1030, 330],
+    "in": "slide_right", "out": "slide_out_right", "out_d": 0.25, "idle": "none",
+    "sfx": null
+  },
+  "handwrite": {
+    "z": 6, "family": "Yusei Magic", "weight": 400, "size": 96, "max_width": 900,
+    "fill": "#ff4f8b", "accent": "#ff9a00",
+    "strokes": [ { "w": 10, "color": "#ffffff" } ],
+    "shadows": [ { "dx": 0, "dy": 0, "blur": 12, "color": "#ff4f8b99" }, { "dx": 0, "dy": 6, "blur": 6, "color": "#00000066" } ],
+    "pos": [540, 1120], "rotate": -5,
+    "in": "bounce", "out": "fade", "idle": "wobble",
+    "sfx": "kira", "sfx_offset": 0.0
+  },
+  "horror": {
+    "z": 6, "family": "Shippori Mincho B1", "weight": 800, "size": 120, "max_width": 1000,
+    "fill": ["#ff4a4a", "#8a0000"], "accent": ["#ffffff", "#ffb0b0"],
+    "strokes": [ { "w": 3, "color": "#2a0000" } ],
+    "shadows": [ { "dx": 0, "dy": 0, "blur": 26, "color": "#ff0000aa" }, { "dx": 0, "dy": 6, "blur": 8, "color": "#000000cc" } ],
+    "pos": [540, 960],
+    "in": "fade", "out": "fade", "out_d": 0.3, "idle": "tremble",
+    "sfx": null
+  },
+  "note": {
+    "z": 6, "font": "NotoSansJP-Black.otf", "size": 30, "max_width": 900, "align": "left",
+    "fill": "#ffffff", "accent": "#ffe14d",
+    "strokes": [ { "w": 4, "color": "#111111" } ],
+    "shadows": [],
+    "pos": [40, 1560],
+    "in": "fade", "out": "fade", "idle": "none",
+    "sfx": null
+  },
+  "name_plate": {
+    "z": 6, "font": "NotoSansJP-Black.otf", "size": 52, "max_width": 800, "align": "left",
+    "fill": "#ffffff", "accent": "#ffe14d",
+    "strokes": [],
+    "plate": { "type": "slant", "skew": 0.25, "fill": ["#24358a", "#0e1640"], "pad": [40, 14],
+               "bar": { "h": 6, "color": "#e3171d" },
+               "shadow": { "dx": 0, "dy": 8, "blur": 10, "color": "#00000077" } },
+    "pos": [50, 1200],
+    "in": "wipe", "out": "wipe_out", "out_d": 0.25, "idle": "none",
+    "sfx": "whoosh", "sfx_offset": 0.0
+  },
+  "brush_title": {
+    "z": 5, "family": "Yuji Boku", "weight": 400, "size": 160, "max_width": 1000,
+    "fill": "#ffffff", "accent": "#ff3b3b",
+    "strokes": [ { "w": 8, "color": "#111111" } ],
+    "shadows": [ { "dx": 0, "dy": 10, "blur": 14, "color": "#000000aa" } ],
+    "pos": [540, 900],
+    "in": "zoom_in", "out": "fade", "idle": "none",
+    "sfx": "don", "sfx_offset": 0.0
   },
 
   "speedlines":       { "z": 1, "effect": "speedlines", "color": "#000000", "alpha": 0.55, "center": [540, 900], "sfx": null },
