@@ -124,6 +124,29 @@ function wordBoundaries(text) {
   return boundaries;
 }
 
+// 認識トークンは「ポ」「イ」「ント」のように単語の途中で分かれる。
+// 全文から切れ目を求め、助詞・助動詞や数え方も直前の語と一緒に扱う。
+function captionBoundaries(text) {
+  const chars = [...text], boundaries = wordBoundaries(text);
+  if (boundaries && japaneseWords) {
+    const parts = [...japaneseWords.segment(text)].map(p => p.segment);
+    let pos = 0;
+    for (let i = 0; i < parts.length - 1; i++) {
+      pos += [...parts[i]].length;
+      const next = parts[i + 1];
+      const dependent = /^(?:を|が|は|に|の|で|と|も|へ|や|ね|よ|から|まで|より|って|たり|だり|です|でした|ます|ました|ません|いる|な|た|て)$/.test(next);
+      const counter = (/^[0-9０-９一二三四五六七八九十]+$/.test(parts[i]) && /^(?:つ|個|人|回|本|枚|番|目)$/.test(next)) || next === '目' && parts[i] === 'つ';
+      if (!/[。！？!?、,]$/.test(parts[i]) && (dependent || counter)) boundaries.delete(pos);
+    }
+  }
+  const safe = boundaries || new Set(chars.map((_, i) => i + 1));
+  for (const pos of safe) {
+    const a = chars[pos - 1], b = chars[pos];
+    if (b && ((isKata(a) && isKata(b)) || (isKanji(a) && isKanji(b)) || breakScore(chars, pos) <= -100)) safe.delete(pos);
+  }
+  return safe;
+}
+
 // chars[i-1] と chars[i] の間で切るときの自然さ（大きいほど良い）
 function breakScore(chars, i) {
   const a = chars[i - 1], b = chars[i];
@@ -138,9 +161,10 @@ function breakScore(chars, i) {
   return 0;
 }
 
-function bestBreak(chars, target, lo, hi) {
+function bestBreak(chars, target, lo, hi, boundaries = null) {
   let best = -1, bestScore = -Infinity;
   for (let i = Math.max(1, lo); i <= Math.min(chars.length - 1, hi); i++) {
+    if (boundaries && !boundaries.has(i)) continue;
     const s = breakScore(chars, i) - Math.abs(i - target) * 0.8;
     if (s > bestScore) { bestScore = s; best = i; }
   }
@@ -173,7 +197,8 @@ function splitText(text) {
 export function wrapLine(text, max = 13) {
   const chars = [...text];
   if (text.includes("\n") || chars.length <= max) return text;
-  const at = bestBreak(chars, Math.ceil(chars.length / 2), 3, chars.length - 3);
+  const at = bestBreak(chars, Math.ceil(chars.length / 2), 1, chars.length - 1, captionBoundaries(text));
+  if (at < 0) return text;
   return chars.slice(0, at).join("").replace(/[、,]$/u, "") + "\n" + chars.slice(at).join("");
 }
 
@@ -241,35 +266,41 @@ const PAUSE_BREAK = 0.45; // これ以上の間があれば字幕を分ける（
 export function buildLinesFromWords(words, speech = []) {
   const lines = [];
   let buf = [];
+  let emittedChars = 0;
+  const boundaries = captionBoundaries(words.map(w => w[2]).join(''));
   const emit = (n = buf.length) => {
     const part = buf.slice(0, n);
     buf = buf.slice(n);
     let text = part.map((w) => w[2]).join("");
+    emittedChars += [...text].length;
     const count = (re) => (text.match(re) || []).length;
     if (count(/「/g) !== count(/」/g)) text = text.replace(/[「」]/g, "");
     text = text.replace(/[。、,]$/u, "");
     if (text.trim()) lines.push({ id: crypto.randomUUID(), src: [part[0][0], part[part.length - 1][1]], text, cut: false, fx: "", fxText: "" });
   };
   const chars = () => buf.map((w) => w[2]).join("");
+  const emitAtPause = () => {
+    let pos = emittedChars, last = 0;
+    for (let k = 0; k < buf.length; k++) {
+      pos += [...buf[k][2]].length;
+      if (boundaries.has(pos)) last = k + 1;
+    }
+    // 間が単語・文節の途中なら、その文節を次の字幕に持ち越す。
+    if (last) emit(last);
+  };
   words.forEach((w, i) => {
     const previous = words[i - 1];
-    if (buf.length && previous && speech.some(s => s.start > previous[1] && s.start <= w[0])) emit();
+    if (buf.length && previous && (w[0] - previous[1] >= PAUSE_BREAK || speech.some(s => s.start > previous[1] && s.start <= w[0]))) emitAtPause();
     buf.push(w);
-    const next = words[i + 1];
     const len = [...chars()].length;
     if (SENT_END.test(w[2]) || (/[、,]$/.test(w[2]) && len >= 8)) return emit();
-    const lastChar = [...w[2]].at(-1), nextChar = next?.[2]?.[0];
-    const insideWord = nextChar && ((isKata(lastChar) && isKata(nextChar)) || (isKanji(lastChar) && isKanji(nextChar)));
-    const pauseBoundary = next && wordBoundaries(chars() + next[2]);
-    if (next && next[0] - w[1] >= PAUSE_BREAK && (pauseBoundary ? pauseBoundary.has(len) : !insideWord)) return emit();
     if (len >= HARD_MAX) {
       // 単語の切れ目のうち、日本語として自然な所で分ける
       let best = -1, bestScore = -Infinity, pos = 0;
-      const cs = [...chars()], boundaries = wordBoundaries(chars());
+      const cs = [...chars()];
       for (let k = 1; k < buf.length; k++) {
         pos += [...buf[k - 1][2]].length;
-        if (boundaries && !boundaries.has(pos)) continue;
-        if ((isKata(cs[pos - 1]) && isKata(cs[pos])) || (isKanji(cs[pos - 1]) && isKanji(cs[pos]))) continue;
+        if (!boundaries.has(emittedChars + pos)) continue;
         const rest = cs.slice(pos).join("");
         const continuation = /^(?:います|いました|いません|ます|ました|ません|です|でした|ている|でいる|って)/.test(rest) || /^[をがはにのでともへ]$/.test(buf[k][2]);
         const s = breakScore(cs, pos) - Math.abs(pos - SOFT_MAX) * 0.8 - (continuation ? 40 : 0);

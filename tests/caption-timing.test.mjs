@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeWords, alignWordTimes, buildLinesFromWords, buildItems, toSrt } from '../telop-studio/js/timeline.js';
+import { normalizeWords, alignWordTimes, buildLinesFromWords, buildItems, toSrt, wrapLine } from '../telop-studio/js/timeline.js';
 
 const line = (id, start, end, extra = {}) => ({ id, src: [start, end], text: id, ...extra });
 const levels = (duration, spans) => {
@@ -46,6 +46,57 @@ test('音の間があってもカタカナ語をノ／イズのように分け�
   assert.ok(!result.some(l=>l.text.endsWith('ノ') || l.text.startsWith('イズ')));
   assert.equal(result.map(l=>l.text).join(''),'これは音量のバランスとかそもそものノイズです');
   assert.ok(!result.some(l=>l.text.endsWith('そも') || l.text.startsWith('そもの')));
+});
+
+test('カット位置がポ／イントの間でも、語全体を次の字幕へ送る', () => {
+  const words = [[0,.3,'大事な'],[.3,.5,'ポ'],[1.2,1.3,'イ'],[1.3,1.5,'ント'],[1.5,2,'を伝えます。']];
+  for (const speech of [[],[{start:0,end:.6},{start:1.1,end:2.1}]]) {
+    const result = buildLinesFromWords(words,speech);
+    assert.deepEqual(result.map(l=>l.text),['大事な','ポイントを伝えます']);
+    assert.deepEqual(result[1].src,[.3,2]);
+  }
+});
+
+test('話／の中のように、間の直前の名詞と次の助詞を離さない', () => {
+  const words = [[0,.4,'説明した形で'],[.4,.6,'話'],[1.4,1.5,'の'],[1.5,1.6,'中'],[1.6,2,'には大切なことがあります。']];
+  const result = buildLinesFromWords(words,[{start:0,end:.7},{start:1.3,end:2.1}]);
+  assert.deepEqual(result.map(l=>l.text),['説明した形で','話の中には大切なことがあります']);
+});
+
+test('3／つ／目の途中に無音・カットがあっても数え方を一緒にする', () => {
+  const words = [[0,.2,'3'],[1,1.2,'つ'],[2,2.2,'目'],[2.2,3,'が大切です。']];
+  assert.deepEqual(buildLinesFromWords(words).map(l=>l.text),['3つ目が大切です']);
+});
+
+test('文字数の上限に達した時点の断片ではなく、全文の単語境界で区切る', () => {
+  const text = 'これは大切な内容を説明するためのものですそもそものポイントを確認していきます。';
+  const words = [...text].map((ch,i)=>[i*.1,(i+1)*.1,ch]);
+  const result = buildLinesFromWords(words);
+  assert.ok(result.length>1);
+  assert.equal(result.map(l=>l.text).join(''),text.slice(0,-1));
+  let pos = 0;
+  for (const l of result.slice(0,-1)) {
+    pos += [...l.text].length;
+    for (const word of ['そもそも','ポイント','説明','確認']) {
+      const start = [...text.slice(0,text.indexOf(word))].length;
+      assert.ok(pos<=start || pos>=start+[...word].length,`${word}の途中: ${l.text}`);
+    }
+  }
+});
+
+test('語尾の時刻が分かれていても助動詞を別字幕にしない', () => {
+  const result = buildLinesFromWords([[0,.2,'確認し'],[.9,1.1,'ます。'],[1.5,1.7,'次です。']]);
+  assert.deepEqual(result.map(l=>l.text),['確認します','次です']);
+});
+
+test('画面内の2行折り返しも単語や助詞の途中を避ける', () => {
+  for (const text of ['とても重要なポイントを確認します','説明した形で話の中には大切なことがあります','スーパーカリフラジリスティックエクスピアリドーシャス']) {
+    const wrapped = wrapLine(text,5);
+    assert.equal(wrapped.replace('\n',''),text);
+    assert.ok(!wrapped.includes('ポ\nイント'));
+    assert.ok(!wrapped.includes('話\nの'));
+    if (/^[\p{Script=Katakana}ー]+$/u.test(text)) assert.equal(wrapped,text);
+  }
 });
 
 test('カット境界で字幕を切り替え、前の字幕を次の区間まで残さない', () => {
