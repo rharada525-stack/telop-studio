@@ -9,7 +9,11 @@ let seg = null; // 話者判別モデル（約6MB）
 
 const progress = (p) => self.postMessage({ type: "progress", p });
 
-async function transcribe({ audio, model, device }) {
+// 1語ごとの時刻を出せる版（_timestamped）を使う。言葉を話している所を切らないための保護に使う
+const wordModel = (model) => (model.endsWith("_timestamped") ? model : `${model}_timestamped`);
+
+async function transcribe({ audio, model: baseModel, device }) {
+  const model = wordModel(baseModel);
   const key = `${model}|${device}`;
   if (!asr || loadedKey !== key) {
     // 低スペックモードへ切り替えるとき、高精度モデルをメモリに残さない。
@@ -30,9 +34,10 @@ async function transcribe({ audio, model, device }) {
     task: "transcribe",
     chunk_length_s: 30,
     stride_length_s: 5,
-    return_timestamps: true,
+    return_timestamps: "word",
   });
-  return out.chunks || [];
+  // [{ text, timestamp: [開始, 終了] }] を 1語ずつ
+  return (out.chunks || []).filter((w) => w.text && Array.isArray(w.timestamp));
 }
 
 // 話者の区間 [{ id, start, end }]（秒）。同時に判別できるのは3人まで
@@ -59,9 +64,9 @@ self.onmessage = async (e) => {
       self.postMessage({ type: "speakers", segments: await diarize(m.audio) });
       return;
     }
-    const chunks = await transcribe(m);
+    const words = await transcribe(m);
     const segments = m.speakers ? await diarize(m.audio) : null;
-    self.postMessage({ type: "done", chunks, segments });
+    self.postMessage({ type: "done", words, segments });
   } catch (err) {
     self.postMessage({ type: "error", message: String((err && err.message) || err) });
   }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProjectStore, sameFiles, validateProject } from '../telop-studio/js/project-store.js';
-import { MODEL_CACHE, modelCacheEntries, deleteModelCache } from '../telop-studio/js/model-cache.js';
+import { MODEL_CACHE, modelCacheEntries, deleteModelCache, deleteOldModels } from '../telop-studio/js/model-cache.js';
 
 function fixture() {
   const values = new Map();
@@ -159,4 +159,21 @@ test('モデル削除はこのツールのモデルだけを対象とし、他�
 test('モデル未保存のブラウザでは空キャッシュを作らず、削除0件になる', async () => {
   const cacheStorage = { keys: async () => [], open: () => assert.fail('空キャッシュを作らない') };
   assert.equal(await deleteModelCache(cacheStorage), 0);
+});
+
+test('起動時の自動削除は、使わなくなった旧版の文字起こしモデルだけを消す', async () => {
+  const urls = [
+    'https://huggingface.co/onnx-community/whisper-base/resolve/main/onnx/encoder_model.onnx',
+    'https://huggingface.co/onnx-community/whisper-large-v3-turbo/resolve/main/config.json',
+    'https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main/config.json',
+    'https://huggingface.co/onnx-community/pyannote-segmentation-3.0/resolve/main/onnx/model.onnx',
+    'https://huggingface.co/other/whisper-base/resolve/main/config.json',
+  ];
+  const remaining = new Set(urls.map(url => ({ url })));
+  const cacheStorage = {
+    keys: async () => [MODEL_CACHE],
+    open: async () => ({ keys: async () => [...remaining], delete: async request => remaining.delete(request) }),
+  };
+  assert.equal(await deleteOldModels(cacheStorage), 2);
+  assert.deepEqual([...remaining].map(r => r.url), urls.slice(2));
 });
