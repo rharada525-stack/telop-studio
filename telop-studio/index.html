@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Zen+Maru+Gothic:wght@500;700;900&family=Dela+Gothic+One&family=Kosugi+Maru&family=BIZ+UDPGothic:wght@400;700&family=Noto+Serif+JP:wght@700;900&family=Shippori+Mincho+B1:wght@700;800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=20261022-timeline2">
+<link rel="stylesheet" href="css/app.css?v=20261022-review1">
 </head>
 <body>
 <header class="topbar">
@@ -223,8 +223,10 @@
   <label class="cut-clip-label">素材<select id="selCutClip"></select></label>
   <div class="cut-editor-grid">
     <div>
+      <div class="cut-review-actions"><button id="btnReviewEdited" class="ghost small" type="button">▶ カット後を再生</button><button id="btnReviewFromStart" class="ghost small" type="button">先頭から再生</button><button id="btnReviewSource" class="ghost small" type="button" hidden>元動画に戻る</button></div>
       <video id="cutSourceVideo" controls playsinline preload="metadata" aria-label="カット前の元動画"></video>
-      <p class="hint">元動画の位置 <span id="cutSourceTime" class="mono"></span>（字幕なし）</p>
+      <div id="cutReviewPlayer" hidden aria-label="カット後の動画プレビュー"></div>
+      <p class="hint"><span id="cutSourceLabel">元動画の位置</span> <span id="cutSourceTime" class="mono"></span><span id="cutSourceNote">（字幕なし）</span></p>
       <div class="cut-frame-actions"><button id="btnCutFrameBack" class="ghost small" type="button">1コマ前へ</button><button id="btnCutFrameNext" class="ghost small" type="button">1コマ後へ</button><button id="btnStopCutPreview" class="ghost small" type="button">停止</button></div>
     </div>
     <div class="cut-range-controls">
@@ -264,6 +266,6 @@
   </form>
 </dialog>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
-<script type="module" src="js/app.js?v=20261022-timeline2"></script>
+<script type="module" src="js/app.js?v=20261022-review1"></script>
 </body>
 </html>

@@ -15,7 +15,7 @@ import { createProjectStore, validateProject, projectFiles, sameFiles } from "./
 import { modelCacheEntries, deleteModelCache, deleteOldModels } from "./model-cache.js";
 import { createEditHistory, resetSubtitles } from "./edit-history.js";
 import { clearRangeEdits, linesForOutput } from "./range-edits.js";
-import { createCutEditor } from "./cut-editor.js?v=20261022-timeline2";
+import { createCutEditor } from "./cut-editor.js?v=20261022-review1";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -953,6 +953,20 @@ const cutEditor = createCutEditor({
   clips: () => state.clips, segments: () => state.segs, edits: () => state.rangeEdits,
   lines: () => state.lines,
   previewSegments: edits => buildSegments(state.speech,state.lines,edits,state.clips),
+  review: {
+    canvas, transport: document.querySelector('.transport'), stop,
+    position: () => {
+      const {src,seg} = outToSrc(state.segs,state.t);
+      return {src,clip:state.segs[seg]?.clip || 0};
+    },
+    start: async (src,fromStart,isCurrent) => {
+      stop();
+      await settle();
+      if (!isCurrent() || !state.segs.length) return;
+      await seekTo(fromStart ? 0 : srcToOut(state.segs,src));
+      if (isCurrent()) await play();
+    },
+  },
   currentSource: () => state.segs.length ? outToSrc(state.segs,state.t).src : 0,
   history: () => editHistory,
   undo: () => historyAction(() => editHistory.undo(),'1つ前の編集に戻しました。'),
