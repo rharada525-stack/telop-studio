@@ -14,11 +14,17 @@ export async function modelCacheEntries(storage) {
   return (await cache.keys()).filter(isToolModel);
 }
 
-export async function deleteModelCache(storage) {
-  const entries = await modelCacheEntries(storage);
+// 1語ごとの時刻を出せない旧版（_timestamped なし）。今は使わないので、起動時に自動で消す
+export const isOldModel = (request) => isToolModel(request) &&
+  /^\/onnx-community\/whisper-(base|small|large-v3-turbo)\/resolve\//.test(new URL(typeof request === 'string' ? request : request.url).pathname);
+
+export async function deleteModelCache(storage, filter = () => true) {
+  const entries = (await modelCacheEntries(storage)).filter(filter);
   if (!entries.length) return 0;
   const cache = await storage.open(MODEL_CACHE);
   let count = 0;
   for (const request of entries) if (await cache.delete(request)) count++;
   return count;
 }
+
+export const deleteOldModels = (storage) => deleteModelCache(storage, isOldModel);

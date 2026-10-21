@@ -12,7 +12,7 @@ import { autoEdit, describe } from "./autoedit.js";
 import { buildPremierePackage } from "./premiere.js";
 import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js";
 import { createProjectStore, validateProject, projectFiles, sameFiles } from "./project-store.js";
-import { modelCacheEntries, deleteModelCache } from "./model-cache.js";
+import { modelCacheEntries, deleteModelCache, deleteOldModels } from "./model-cache.js";
 import { createEditHistory, resetSubtitles } from "./edit-history.js";
 
 const $ = (id) => document.getElementById(id);
@@ -1142,6 +1142,10 @@ async function showModelCache() {
     setStatus("modelStatus", entries.length ? `このブラウザにモデル関連ファイルが ${entries.length} 件保存されています。` : "このブラウザには、このツールの保存済みモデルはありません。");
   } catch (e) { setStatus("modelStatus", `保存状況を確認できません：${e.message}`, true); }
 }
+// 使わなくなった旧版の文字起こしモデルを、起動時に自動で削除する（パソコンの容量を圧迫しないように）
+if (window.caches) deleteOldModels(window.caches).then((n) => {
+  if (n) console.info(`使わなくなった古いAIモデルのファイルを ${n} 件削除しました`);
+}).catch(() => {});
 $("modelStorage").ontoggle = () => { if ($("modelStorage").open) showModelCache(); };
 $("btnDeleteModels").onclick = async () => {
   if (analysisRunning || projectTransition || deletingModels || document.body.classList.contains("busy")) return;
