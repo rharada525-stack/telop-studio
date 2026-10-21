@@ -2,7 +2,7 @@ import { resolveStyles } from "./telop.js";
 import { Renderer } from "./render.js";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
-  CUT_PRESETS, normalizeWords, buildLinesFromWords, retakeHints,
+  CUT_PRESETS, normalizeWords, alignWordTimes, buildLinesFromWords, retakeHints, timedLines,
   totalDuration, srcToOut, outToSrc, toSrt, FX, FX_POS, SCREEN, FRAME, layoutClips, splitAtClips, clipAt, assignSpeakers,
 } from "./timeline.js";
 import { mixAudio, exportMp4 } from "./export.js";
@@ -27,6 +27,7 @@ const state = {
   pcm: null,        // 全素材をつないだ 16kHz モノラル（文字起こし用）
   speech: [],
   lines: [],
+  captionTimes: [],
   segs: [],
   settings: defaultSettings(),
   editSpeaker: "A", // デザインパネルで編集中の話者
@@ -286,7 +287,7 @@ async function clipsChanged(fromAdd) {
   $("dropzone").classList.toggle("loaded", has);
   $("btnAnalyze").disabled = !has;
   if (!has) {
-    Object.assign(state, { db: null, pk: null, pcm: null, words: [], speech: [], lines: [], segs: [], items: [] });
+    Object.assign(state, { db: null, pk: null, pcm: null, words: [], speech: [], lines: [], captionTimes: [], segs: [], items: [] });
     await renderer.setItems([]);
     renderTable();
     editHistory.reset(editSnapshot());
@@ -449,9 +450,9 @@ function analyze(onlySpeakers = false) {
       const dur = state.pcm.length / 16000;
       if (m.words) {
         // 1語ごとの時刻：字幕のタイミングに使い、話している所はカットしないよう保護する
-        state.words = normalizeWords(m.words, dur);
+        state.words = alignWordTimes(normalizeWords(m.words, dur), { rms: state.db, peak: state.pk || state.db }, cutOptions());
         computeSpeech();
-        state.lines = buildLinesFromWords(state.words);
+        state.lines = buildLinesFromWords(state.words, state.speech);
       } else {
         computeSpeech();
         state.lines = buildLines(m.chunks, state.speech, dur);
@@ -503,6 +504,7 @@ async function settle() {
 async function doRefresh(rebuildTable) {
   if (!state.clips.length) return;
   state.segs = buildSegments(state.speech, state.lines);
+  state.captionTimes = timedLines(state.lines, state.segs, state.settings);
   const total = totalDuration(state.segs);
   state.items = buildItems(state.lines, state.segs, state.settings);
   await renderer.setItems(state.items);
@@ -527,6 +529,8 @@ function renderTable() {
   const toOpts = (o) => Object.entries(o).map(([k, v]) => `<option value="${k}">${typeof v === "string" ? v : v.name}</option>`).join("");
   const opts = toOpts(FX), posOpts = toOpts(FX_POS), scrOpts = toOpts(SCREEN);
   const multi = state.clips.length > 1;
+  const lineStarts = new Map();
+  for (const c of state.captionTimes) if (!lineStarts.has(c.l.id)) lineStarts.set(c.l.id, c.t0);
   // 言い直しの候補（お知らせだけ。カットするかは本人が決める）
   const hints = state.words?.length ? retakeHints(state.words, (t) => clipAt(state.clips, t)) : [];
   const HINT_LABEL = { retake: "言い直し?", repeat: "繰り返し?", stall: "中断?" };
@@ -553,8 +557,9 @@ function renderTable() {
     const bt = tr.querySelector(".time button"), ta = tr.querySelector("textarea");
     const sel = tr.querySelector(".fx-type"), inp = tr.querySelector(".fx input[type=text]");
     const pos = tr.querySelector(".fx-pos select"), scr = tr.querySelector(".scr select"), cb = tr.querySelector(".cut input");
-    bt.textContent = fmt(srcToOut(state.segs, l.src[0]));
-    bt.onclick = () => seekTo(srcToOut(state.segs, l.src[0]) + 0.01);
+    const start = lineStarts.get(l.id) ?? srcToOut(state.segs, l.src[0]);
+    bt.textContent = fmt(start);
+    bt.onclick = () => seekTo(start + 0.001);
     ta.value = l.text;
     ta.oninput = () => { l.text = ta.value; scheduleRefresh(); };
     // 話者（1人だけのときは隠す）
@@ -597,9 +602,9 @@ function renderTable() {
 }
 
 function highlightRow() {
-  const cur = state.items?.find((it) => it.style.startsWith("subtitle") && state.t >= it.t && state.t < it.t + it.d);
+  const cur = state.captionTimes.find(it => state.t >= it.t0 && state.t < it.end);
   for (const tr of $("lines").querySelectorAll("tbody tr[data-id]")) {
-    const on = cur && tr.dataset.id === cur.line;
+    const on = cur && tr.dataset.id === cur.l.id;
     if (on && !tr.classList.contains("current") && state.playing) tr.scrollIntoView({ block: "nearest" });
     tr.classList.toggle("current", !!on);
   }
@@ -657,7 +662,7 @@ function computeVoiceGain() {
   state.voiceAutoGain = Math.min(6, Math.max(0.4, 10 ** ((-20 - db) / 20)));
 }
 
-let sfxCtx, sfxNodes = [], segIdx = 0, active = null, voiceBus, sfxBus;
+let sfxCtx, sfxNodes = [], segIdx = 0, active = null, voiceBus, sfxBus, playbackRun = 0;
 function audioGraph() {
   sfxCtx ||= new AudioContext();
   if (!voiceBus) {
@@ -676,12 +681,14 @@ function audioGraph() {
 }
 
 async function play() {
+  const run = ++playbackRun;
   const total = totalDuration(state.segs);
   if (state.t >= total - 0.05) state.t = 0;
   const { seg, clip, local } = locate(state.t);
   segIdx = seg;
   active = clip.video;
   await waitSeek(active, local);
+  if (run !== playbackRun) return;
   state.playing = true;
   $("btnPlay").textContent = "❚❚";
   audioGraph();
@@ -696,12 +703,12 @@ async function play() {
     n.start(now + Math.max(0, e.t - state.t));
     sfxNodes.push(n);
   }
-  await active.play();
-  requestAnimationFrame(tick);
+  try { await active.play(); } catch { if (run === playbackRun) stop(); return; }
+  if (run === playbackRun) requestAnimationFrame(() => tick(run));
 }
 
-function tick() {
-  if (!state.playing) return;
+async function tick(run) {
+  if (!state.playing || run !== playbackRun) return;
   let s = state.segs[segIdx];
   let c = state.clips[s.clip];
   const local = active.currentTime;
@@ -710,23 +717,22 @@ function tick() {
     if (segIdx >= state.segs.length) { state.t = totalDuration(state.segs); stop(); updateClock(); return; }
     s = state.segs[segIdx];
     c = state.clips[s.clip];
-    if (c.video !== active) {
-      // 次の素材へ切り替え
-      active.pause();
-      active = c.video;
-      active.currentTime = s.start - c.offset;
-      active.play();
-    } else {
-      active.currentTime = s.start - c.offset; // 次の区間へジャンプ（ジャンプカット）
-    }
+    // 古い映像の上に次の字幕だけを先に描かないよう、シークが完了してから一緒に切り替える。
+    active.pause();
+    active = c.video;
+    await waitSeek(active, s.start - c.offset);
+    if (!state.playing || run !== playbackRun) return;
+    try { await active.play(); } catch { stop(); return; }
+    if (!state.playing || run !== playbackRun) return;
   }
   state.t = s.out + Math.max(0, Math.min(active.currentTime + c.offset, s.end) - s.start);
   renderer.draw(ctx, state.t, active, state.settings.layout);
   updateClock();
-  requestAnimationFrame(tick);
+  requestAnimationFrame(() => tick(run));
 }
 
 function stop() {
+  playbackRun++;
   state.playing = false;
   for (const c of state.clips) c.video.pause();
   $("btnPlay").textContent = "▶";
@@ -1095,7 +1101,7 @@ $("inpVoice").oninput = (e) => { state.settings.audio.voice = Number(e.target.va
 $("inpSfx").oninput = (e) => { state.settings.audio.sfx = Number(e.target.value); audioChanged(); };
 $("btnSrt").onclick = async () => {
   await settle();
-  download(new Blob([toSrt(state.lines, state.segs)], { type: "text/plain" }), baseName() + ".srt");
+  download(new Blob([toSrt(state.lines, state.segs, state.settings)], { type: "text/plain" }), baseName() + ".srt");
 };
 $("btnOpenSave").onclick = () => {
   const id = $("selSave").value;

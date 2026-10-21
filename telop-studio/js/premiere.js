@@ -208,7 +208,7 @@ export async function buildPremierePackage({ clips, segs, lines, renderer, setti
     `</samplecharacteristics></format>${audioTracks.join("")}</audio></media></sequence></xmeml>\n`;
 
   files[`${dir}/${name}.xml`] = strToU8(xml);
-  files[`${dir}/${name}_字幕.srt`] = strToU8(toSrt(lines, segs));
+  files[`${dir}/${name}_字幕.srt`] = strToU8(toSrt(lines, segs, settings));
   files[`${dir}/はじめにお読みください.txt`] = strToU8(readme(name, dir, folder, clips));
   onProgress?.(0.95);
   const zip = zipSync(files, { level: 0 }); // 画像も音もすでに圧縮済みなので無圧縮でまとめる

@@ -115,6 +115,14 @@ const SOFT_MAX = 16, HARD_MAX = 24;
 const isKanji = (c) => /\p{Script=Han}/u.test(c);
 const isKata = (c) => /[\p{Script=Katakana}ー]/u.test(c);
 const isHira = (c) => /\p{Script=Hiragana}/u.test(c);
+const japaneseWords = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+function wordBoundaries(text) {
+  if (!japaneseWords) return null;
+  let pos = 0;
+  const boundaries = new Set();
+  for (const part of japaneseWords.segment(text)) { pos += [...part.segment].length; boundaries.add(pos); }
+  return boundaries;
+}
 
 // chars[i-1] と chars[i] の間で切るときの自然さ（大きいほど良い）
 function breakScore(chars, i) {
@@ -173,21 +181,64 @@ export function wrapLine(text, max = 13) {
 // Whisper の単語（{ text, timestamp: [開始, 終了] }）を、保存用の [開始, 終了, 文字] にそろえる
 export function normalizeWords(raw, duration) {
   const out = [];
-  for (const w of raw || []) {
+  const valid = (raw || []).filter(w => Number.isFinite(w.timestamp?.[0])).sort((a, b) => a.timestamp[0] - b.timestamp[0]);
+  for (const w of valid) {
     const text = (w.text || "").replace(/\s+/g, "");
     let [s, e] = w.timestamp || [];
-    if (!text || !Number.isFinite(s)) continue;
-    if (!Number.isFinite(e) || e <= s) e = Math.min(duration, s + 0.3);
-    out.push([Math.max(0, s), Math.min(duration, e), text]);
+    if (!text || s >= duration) continue;
+    s = Math.max(0, s);
+    const last = out.at(-1);
+    // 日本語の小さい文字など、同時刻のトークンは一緒に扱う。0.3秒の仮の長さを足さない。
+    if (last && s === last[0]) {
+      last[2] += text;
+      if (Number.isFinite(e)) last[1] = Math.max(last[1] || s, e);
+    } else out.push([s, Number.isFinite(e) && e > s ? Math.min(duration, e) : null, text]);
   }
-  return out.sort((a, b) => a[0] - b[0]);
+  return out.map(([s, e, text], i) => {
+    const next = out[i + 1]?.[0] ?? duration;
+    return [s, Math.max(s, Math.min(e ?? next, next, duration)), text];
+  }).filter(w => w[1] > w[0]);
+}
+
+// Whisperが単語の前後の長い無音まで含めた場合だけ、実際の音声の区間に寄せる。
+// 声が小さく検出できない単語は、認識した時刻を残す（音量だけで言葉を落とさない）。
+export function alignWordTimes(words, levels, opts = {}) {
+  const voice = detectSpeech(levels, { ...opts, minimum: 0.25, lead: 0.03, tail: 0.06 });
+  const aligned = [];
+  for (let i = 0; i < words.length; i++) {
+    const [s, e, text] = words[i];
+    let start = s, end = e;
+    const spans = voice.map(v => ({ start: Math.max(s, v.start), end: Math.min(e, v.end), onset: v.start })).filter(v => v.end - v.start > 0.005);
+    if (spans.length) {
+      let chosen = spans[0];
+      // 前の発言の語尾がわずかに入り込んだ後に、長い無音と本来の単語が続く場合。
+      if (spans.length > 1 && chosen.end - chosen.start <= 0.16 && spans[1].start - chosen.end >= 0.25) chosen = spans[1];
+      if (chosen.start - s >= 0.12) start = chosen.start;
+      const previousEnd = aligned.at(-1)?.[1] ?? 0;
+      if (chosen.onset < s && s - chosen.onset <= 0.35 && previousEnd <= chosen.onset) start = chosen.onset;
+      const nextSpan = spans[spans.indexOf(chosen) + 1];
+      const last = [...text.replace(/[。、,！？!?]/g, '')].length > 6 ? spans.at(-1) : chosen;
+      if (e - last.end >= 0.12 && (last !== chosen || !nextSpan || nextSpan.start - chosen.end >= 0.25)) end = last.end;
+    } else if (/^(?:います|いました|いません|ます|ました|ません|です|でした|す|た|ね|よ)[。！？!?]*$/.test(text)) {
+      const previous = aligned.at(-1);
+      const nearby = voice.findLast(v => v.end <= s && s - v.end <= 0.35);
+      if (previous && nearby && Math.abs(previous[1] - nearby.end) < 0.04) {
+        previous[2] += text;
+        continue;
+      }
+    }
+    start = Math.max(start, aligned.at(-1)?.[1] ?? 0);
+    if (end > start) aligned.push([start, end, text]);
+    else aligned.push([s, e, text]);
+  }
+  return aligned;
 }
 
 const SENT_END = /[。！？!?]$/;
 const PAUSE_BREAK = 0.45; // これ以上の間があれば字幕を分ける（秒）
 
 // 単語の時刻をそのまま使って字幕を作る（言った瞬間に出て、言い終わりで消える）
-export function buildLinesFromWords(words) {
+export function buildLinesFromWords(words, speech = []) {
   const lines = [];
   let buf = [];
   const emit = (n = buf.length) => {
@@ -201,21 +252,30 @@ export function buildLinesFromWords(words) {
   };
   const chars = () => buf.map((w) => w[2]).join("");
   words.forEach((w, i) => {
+    const previous = words[i - 1];
+    if (buf.length && previous && speech.some(s => s.start > previous[1] && s.start <= w[0])) emit();
     buf.push(w);
     const next = words[i + 1];
     const len = [...chars()].length;
     if (SENT_END.test(w[2]) || (/[、,]$/.test(w[2]) && len >= 8)) return emit();
-    if (next && next[0] - w[1] >= PAUSE_BREAK && len >= 4) return emit();
+    const lastChar = [...w[2]].at(-1), nextChar = next?.[2]?.[0];
+    const insideWord = nextChar && ((isKata(lastChar) && isKata(nextChar)) || (isKanji(lastChar) && isKanji(nextChar)));
+    const pauseBoundary = next && wordBoundaries(chars() + next[2]);
+    if (next && next[0] - w[1] >= PAUSE_BREAK && (pauseBoundary ? pauseBoundary.has(len) : !insideWord)) return emit();
     if (len >= HARD_MAX) {
       // 単語の切れ目のうち、日本語として自然な所で分ける
-      let best = buf.length - 1, bestScore = -Infinity, pos = 0;
+      let best = -1, bestScore = -Infinity, pos = 0;
+      const cs = [...chars()], boundaries = wordBoundaries(chars());
       for (let k = 1; k < buf.length; k++) {
         pos += [...buf[k - 1][2]].length;
-        const cs = [...chars()];
-        const s = breakScore(cs, pos) - Math.abs(pos - SOFT_MAX) * 0.8;
+        if (boundaries && !boundaries.has(pos)) continue;
+        if ((isKata(cs[pos - 1]) && isKata(cs[pos])) || (isKanji(cs[pos - 1]) && isKanji(cs[pos]))) continue;
+        const rest = cs.slice(pos).join("");
+        const continuation = /^(?:います|いました|いません|ます|ました|ません|です|でした|ている|でいる|って)/.test(rest) || /^[をがはにのでともへ]$/.test(buf[k][2]);
+        const s = breakScore(cs, pos) - Math.abs(pos - SOFT_MAX) * 0.8 - (continuation ? 40 : 0);
         if (s > bestScore && pos >= 6) { bestScore = s; best = k; }
       }
-      emit(best);
+      if (best > 0) emit(best);
     }
   });
   if (buf.length) emit();
@@ -472,7 +532,7 @@ function screenItems(effect, t, d) {
     case "zoom": return [scr("zoom")];
     case "zoom_lines": return [scr("zoom"), lines()];
     case "lines": return [lines()];
-    case "flash": return [{ style: "flash", t, d: 0.4 }, lines("speedlines_white", 1.3)];
+    case "flash": return [{ style: "flash", t, d: Math.min(d, 0.4) }, lines("speedlines_white", Math.min(d, 1.3))];
     case "mono_dark": return [scr("mono"), scr("dark")];
     case "dark": return [scr("dark")];
     case "mono": return [scr("mono")];
@@ -482,16 +542,33 @@ function screenItems(effect, t, d) {
 }
 
 // 描画とSRTで同じ字幕時刻を使う。演出の有無にかかわらず、カットしていない行を残す。
-function timedLines(lines, segs) {
-  const total = totalDuration(segs);
-  const live = lines.filter((l) => !l.cut).map((l) => ({ l, t0: srcToOut(segs, l.src[0]), t1: srcToOut(segs, l.src[1]) }));
-  return live.map(({ l, t0, t1 }, i) => {
+export function timedLines(lines, segs, settings = {}) {
+  const preset = CUT_PRESETS[settings.cutPreset] || CUT_PRESETS.solo;
+  const live = [];
+  const edges = new Map();
+  for (const l of lines.filter(l => !l.cut)) for (const s of segs) {
+    let start = Math.max(l.src[0], s.start), finish = Math.min(l.src[1], s.end);
+    if (finish <= start) continue; // 全部カットされた字幕を、次のカットに映さない。
+    const item = { l, t0: s.out + start - s.start, end: s.out + finish - s.start, segEnd: s.out + s.end - s.start };
+    live.push(item);
+    const edge = edges.get(s);
+    if (!edge) edges.set(s, { first: item, last: item });
+    else {
+      if (item.t0 < edge.first.t0) edge.first = item;
+      if (item.end >= edge.last.end) edge.last = item;
+    }
+  }
+  for (const [s, { first, last }] of edges) {
+    // カット前後の余白でだけ映像と字幕を同時にする。短い次の字幕を前へ重ねない。
+    if (first.t0 - s.out <= preset.lead + 0.15) first.t0 = s.out;
+    if (last.segEnd - last.end <= preset.tail + 0.15) last.end = last.segEnd;
+  }
+  live.sort((a, b) => a.t0 - b.t0);
+  return live.map(({ l, t0, end, segEnd }, i) => {
     const next = live[i + 1];
-    let end = t1;
-    if (next && next.t0 - t1 < 0.6) end = next.t0; // 間が短ければ次の字幕までつなぐ
-    end = Math.min(total, Math.max(end, t0 + 0.5));
-    return { l, t0, end };
-  }).filter(({ t0, end }) => end - t0 > 0.05);
+    if (next) end = Math.min(end, next.t0);
+    return { l, t0, end, segEnd };
+  }).filter(({ t0, end }) => end - t0 > 0.001);
 }
 
 // 字幕行 → 描画用テロップ一覧（出力側の時刻）
@@ -499,10 +576,10 @@ export function buildItems(lines, segs, settings) {
   const total = totalDuration(segs);
   const aspect = settings.aspect || "portrait";
   const speakers = settings.speakers || [];
-  const live = timedLines(lines, segs);
+  const live = timedLines(lines, segs, settings);
   const items = [];
   if (settings.title) items.push({ style: "header", text: settings.title, t: 0.2, d: Math.max(1, total - 0.2) });
-  live.forEach(({ l, t0, end }, i) => {
+  live.forEach(({ l, t0, end, segEnd }, i) => {
     const fx = FX[l.fx];
     const ownText = (l.fxText || "").trim();
     const replaces = !!(fx && fx.style && !ownText); // 字幕そのものを演出テロップにする
@@ -526,6 +603,9 @@ export function buildItems(lines, segs, settings) {
         const nextSame = live.slice(i + 1).find((x) => x.l.fx === l.fx);
         d = (nextSame ? nextSame.t0 : total) - t0;
       }
+      // 字幕を演出に置き換えても、最低1.4秒やオチの余韻で次の発言へはみ出さない。
+      if (replaces) d = end - t0;
+      else if (!PERSIST.has(l.fx)) d = Math.min(d, segEnd - t0, (live[i + 1]?.t0 ?? total) - t0);
       const it = { style, text, t: t0, d, line: l.id };
       if (l.fx === "point") {
         const [label, ...body] = text.split(/[/／]/);
@@ -541,7 +621,7 @@ export function buildItems(lines, segs, settings) {
     const effDur = fx && fx.style && !PERSIST.has(l.fx) ? d : end - t0;
     items.push(...screenItems(effect, t0, effDur));
   });
-  return items.map((it) => ({ ...it, d: Math.min(it.d, total - it.t) })).filter((it) => it.d > 0.05);
+  return items.map((it) => ({ ...it, d: Math.min(it.d, total - it.t) })).filter((it) => it.d > 0.001);
 }
 
 // ---------------------------------------------------------------- speakers
@@ -572,8 +652,8 @@ const ts = (t) => {
   const p = (n, w = 2) => String(n).padStart(w, "0");
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;
 };
-export function toSrt(lines, segs) {
-  return timedLines(lines, segs)
+export function toSrt(lines, segs, settings = {}) {
+  return timedLines(lines, segs, settings)
     .map(({ l, t0, end }, i) => `${i + 1}\n${ts(t0)} --> ${ts(end)}\n${l.text.replace(/[{}\[\]]/g, "")}\n`)
     .join("\n");
 }
