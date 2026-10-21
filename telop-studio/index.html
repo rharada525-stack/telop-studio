@@ -13,8 +13,8 @@
 <header class="topbar">
   <div class="brand">テロップスタジオ <span class="tag">自動カット＋テロップ</span></div>
   <div class="top-actions">
-    <button id="btnSaveProject" class="ghost" disabled>作業を保存</button>
-    <label class="ghost button">作業を開く<input id="inpProject" type="file" accept=".json" hidden></label>
+    <button id="btnSaveProject" class="ghost" disabled>JSONに保存</button>
+    <label class="ghost button">JSONを開く<input id="inpProject" type="file" accept=".json" hidden></label>
   </div>
 </header>
 
@@ -40,6 +40,21 @@
         <span id="fileLabel">話している動画を選ぶ（複数まとめてOK・ドロップでも可）</span>
       </label>
       <ol id="clipList" class="clip-list" hidden></ol>
+      <section class="save-manager" id="saveManager" aria-label="セーブデータ" hidden>
+        <h3>この動画のセーブデータ</h3>
+        <p class="hint">編集中のデータに自動保存します。新しく始めても、前のセーブは残ります。</p>
+        <div class="row">
+          <label>保存した編集を選ぶ<select id="selSave"></select></label>
+          <button id="btnOpenSave" class="ghost" type="button">続きから開く</button>
+        </div>
+        <label class="save-name">編集中のセーブ名<input id="inpSaveName" type="text" maxlength="60"></label>
+        <div class="save-actions">
+          <button id="btnNewSave" class="ghost" type="button">新しく始める</button>
+          <button id="btnCopySave" class="ghost" type="button">今の編集を別セーブに複製</button>
+        </div>
+        <p class="status" id="projectStatus" role="status"></p>
+        <p class="hint save-note">動画本体は保存しません。次回は同じ動画を読み込んで再開できます。別のPCへの移動やバックアップには「JSONに保存」を使ってください。</p>
+      </section>
       <div class="source-settings">
         <label>出力の形
           <select id="selAspect">
@@ -82,6 +97,12 @@
         <button id="btnCancelAnalyze" class="ghost" type="button" hidden>解析を中止</button>
       </div>
       <p class="hint" id="modelHelp">まずは高精度でお試しください。動作が重い・解析に失敗する場合は、低スペックモードで解析し直せます（精度は下がります）。</p>
+      <details class="model-storage" id="modelStorage">
+        <summary>ダウンロード済みAIモデルの管理</summary>
+        <p class="hint">モデルは、このサイトを開いたブラウザ内に保存されます。削除後は、次の解析で必要なモデルを再ダウンロードします。セーブデータや元の動画は残ります。</p>
+        <button id="btnDeleteModels" class="ghost" type="button">このツールのAIモデルを削除</button>
+        <p class="status" id="modelStatus" role="status"></p>
+      </details>
       <div class="row speaker-opt">
         <label class="check"><input id="chkSpeakers" type="checkbox"> 話者も自動で分ける（2〜3人の会話向け）</label>
         <button id="btnDiarize" class="ghost small" type="button" disabled title="文字起こしはそのままで、話者の判別だけやり直します">話者だけ分け直す</button>
@@ -97,6 +118,13 @@
 
     <div class="card grow" id="step3">
       <h2><span class="num">3</span>テロップを直す</h2>
+      <div class="edit-toolbar" aria-label="編集の取り消しと初期化">
+        <button id="btnUndoEdit" class="ghost" type="button" title="元に戻す（Ctrl+Z / ⌘Z）" disabled>↶ 元に戻す</button>
+        <button id="btnRedoEdit" class="ghost" type="button" title="やり直す（Ctrl+Shift+Z / Ctrl+Y / ⌘⇧Z）" disabled>↷ やり直す</button>
+        <button id="btnResetSubtitles" class="ghost" type="button" disabled>字幕をすべて初期化</button>
+      </div>
+      <p class="hint">初期化は文章・時間・話者を残し、全員のデザイン・演出・画面効果・カット指定を元に戻します。初期化も取り消せます。</p>
+      <p class="status edit-status" id="editStatus" role="status"></p>
       <div class="auto-bar">
         <button id="btnAuto" class="auto-btn" type="button" disabled>✨ おまかせ編集</button>
         <label>向き
@@ -112,7 +140,6 @@
             <option value="high">派手</option>
           </select>
         </label>
-        <button id="btnUndoAuto" class="ghost small" type="button" hidden>元に戻す</button>
         <label class="hl-switch"><input id="chkHighlight" type="checkbox" checked> 字幕の大事な言葉を自動で強調色にする（数字・「実は」「一番」など）</label>
         <p class="status" id="autoStatus">字幕の言葉から、見出し・ツッコミ・ズーム・強調色などを自動で付けます。手で設定した行はそのままです。</p>
       </div>

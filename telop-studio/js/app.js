@@ -10,11 +10,15 @@ import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from
 import { autoEdit, describe } from "./autoedit.js";
 import { buildPremierePackage } from "./premiere.js";
 import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js";
+import { createProjectStore, validateProject, projectFiles, sameFiles } from "./project-store.js";
+import { modelCacheEntries, deleteModelCache } from "./model-cache.js";
+import { createEditHistory, resetSubtitles } from "./edit-history.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
 const ctx = canvas.getContext("2d");
 const LONG_WARN = 20 * 60; // これより長いと重くなる（秒）
+const DESIGN_KEY = "telop-studio:defaultDesign";
 
 const state = {
   clips: [],        // 素材: { id, file, media, audio, db, pcm, video, duration, offset, span }
@@ -23,22 +27,79 @@ const state = {
   speech: [],
   lines: [],
   segs: [],
-  settings: {
+  settings: defaultSettings(),
+  editSpeaker: "A", // デザインパネルで編集中の話者
+  voiceAutoGain: 1, // 声を聞きやすい大きさにそろえる倍率（素材から計算）
+  t: 0,             // 出力側の再生位置（秒）
+  playing: false,
+};
+function defaultSettings() {
+  return {
     title: "", layout: "auto", gap: 0.3, aspect: "portrait",
     autoHighlight: true, // 字幕の大事な言葉を自動で強調色にする
     designSet: "standard", // デザインセット
     fxMap: {},             // デザインセットによる演出の見た目の差し替え
     speakers: [{ id: "A", name: "話者A", design: loadDefaultDesign() }], // 話者ごとの字幕デザイン
     audio: { voiceAuto: true, voice: 100, sfx: 40 },  // 音量（%）
-  },
-  editSpeaker: "A", // デザインパネルで編集中の話者
-  voiceAutoGain: 1, // 声を聞きやすい大きさにそろえる倍率（素材から計算）
-  t: 0,             // 出力側の再生位置（秒）
-  playing: false,
-};
+  };
+}
 let renderer, sfxBuffers = {}, refreshDesignPanel = () => {};
+const projectStore = createProjectStore({
+  getItem: (key) => localStorage.getItem(key),
+  setItem: (key, value) => localStorage.setItem(key, value),
+});
+let activeSaveId = null, activeSaveKey = null, analysisRunning = false, projectTransition = false, deletingModels = false;
+const editHistory = createEditHistory(50);
+let historyApplying = false;
+const editGroups = new WeakMap();
+let editGroupId = 0;
 
-const DESIGN_KEY = "telop-studio:defaultDesign";
+function editSnapshot() {
+  const p = projectData();
+  return { settings: p.settings, lines: p.lines, autoEdit: p.autoEdit };
+}
+function editorLocked() { return analysisRunning || projectTransition || historyApplying || document.body.classList.contains("busy"); }
+function syncEditControls() {
+  const locked = editorLocked() || !state.clips.length;
+  $("btnUndoEdit").disabled = locked || !editHistory.canUndo;
+  $("btnRedoEdit").disabled = locked || !editHistory.canRedo;
+  $("btnResetSubtitles").disabled = locked || !state.lines.length;
+  $("btnAuto").disabled = locked || !state.lines.length;
+  $("btnAddLine").disabled = locked || !state.segs.length;
+}
+function recordEdit() {
+  if (!activeSaveId || !state.clips.length || historyApplying || analysisRunning) return;
+  const el = document.activeElement;
+  let group = null;
+  if (el?.matches('textarea, input[type="text"], input[type="number"], input[type="range"], input[type="color"]')) {
+    if (!editGroups.has(el)) editGroups.set(el, ++editGroupId);
+    group = editGroups.get(el);
+  }
+  editHistory.commit(editSnapshot(), group);
+  syncEditControls();
+}
+document.addEventListener("focusout", () => editHistory.endGroup());
+document.addEventListener("pointerup", () => editHistory.endGroup());
+
+async function historyAction(action, status) {
+  if (editorLocked() || !state.clips.length) return;
+  recordEdit();
+  historyApplying = true;
+  updateSaveLocks();
+  try {
+    stop();
+    await settle();
+    const snapshot = action();
+    if (!snapshot) return;
+    applyProject(snapshot, { keepHistory: true });
+    await refresh(true);
+    setStatus("editStatus", status);
+  } finally {
+    historyApplying = false;
+    updateSaveLocks();
+  }
+}
+
 function loadDefaultDesign() {
   try { return normalizeDesign(JSON.parse(localStorage.getItem(DESIGN_KEY))); } catch { return structuredClone(DEFAULT_DESIGN); }
 }
@@ -135,6 +196,7 @@ async function init() {
 // 字幕デザインが変わったら作り直して再描画（連続入力はまとめる）
 let designTimer;
 function designChanged() {
+  recordEdit();
   clearTimeout(designTimer);
   designTimer = setTimeout(async () => {
     designTimer = null;
@@ -172,9 +234,11 @@ function applyFormat() {
 
 // ---------------------------------------------------------------- step 1: clips
 async function addFiles(files) {
+  if (editorLocked()) return;
   files = [...files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$/i.test(f.name));
   if (!files.length) return;
   if (state.lines.length && !confirm("素材を追加すると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
+  if (state.clips.length) { await settle(); if (!save()) return; }
   stop();
   files.sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   for (const [i, file] of files.entries()) {
@@ -211,6 +275,8 @@ async function loadClip(file, status) {
 
 // 素材の並び・数が変わったとき：つないだ音声を作り直す
 async function clipsChanged(fromAdd) {
+  activeSaveId = activeSaveKey = null;
+  $("saveManager").hidden = !state.clips.length;
   renderClipList();
   const has = state.clips.length > 0;
   $("dropHint").hidden = has;
@@ -220,6 +286,8 @@ async function clipsChanged(fromAdd) {
     Object.assign(state, { db: null, pcm: null, speech: [], lines: [], segs: [], items: [] });
     await renderer.setItems([]);
     renderTable();
+    editHistory.reset(editSnapshot());
+    syncEditControls();
     applyFormat();
     for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = true;
     $("cutSummary").textContent = "";
@@ -237,21 +305,33 @@ async function clipsChanged(fromAdd) {
   }
   state.lines = [];
   state.t = 0;
-  $("btnUndoAuto").hidden = true; // 素材が変わったら、おまかせ編集の「元に戻す」は使えない
-  const saved = localStorage.getItem(projectKey());
-  if (saved) {
-    applyProject(JSON.parse(saved));
-    setStatus("anaStatus", "前回の作業を復元しました。最初からやり直す場合は「解析する」を押してください。");
-  } else if (fromAdd && state.pendingProject) {
-    applyProject(state.pendingProject);
-    state.pendingProject = null;
-    setStatus("anaStatus", "読み込んだ作業を使います。");
-  } else {
+  editHistory.reset(editSnapshot());
+  syncEditControls();
+  try {
+    const key = projectKey();
+    const group = projectStore.open(key, projectData());
+    let entry = group.entries.find(e => e.id === group.activeId);
+    // 明示的に開いたJSONを、前回の自動保存より優先する。別セーブとして保存する。
+    if (fromAdd && state.pendingProject && sameFiles(projectFiles(state.pendingProject), projectData().files)) {
+      entry = projectStore.create(key, state.pendingProject);
+      state.pendingProject = null;
+    }
+    activeSaveKey = key;
+    activeSaveId = entry.id;
+    applyProject(entry.project);
+    renderSaveControls();
     const long = sourceDuration() > LONG_WARN ? `（合計 ${fmt(sourceDuration())}。長い素材は文字起こしに時間がかかります）` : "";
-    setStatus("anaStatus", `「解析する」を押すと、無言部分のカットと文字起こしをします。${long}`);
+    setStatus("anaStatus", entry.project.lines.length
+      ? `「${entry.name}」を復元しました。やり直す場合は「新しく始める」を押してください。`
+      : `「解析する」を押すと、無言部分のカットと文字起こしをします。${long}`);
+    if (state.pendingProject) setStatus("projectStatus", "JSONの素材と一致しません。動画の名前・サイズ・並び順を確認してください。", true);
+  } catch (e) {
+    setStatus("projectStatus", `保存データを開けません：${e.message}。JSONに保存してバックアップできます。`, true);
   }
+  updateSaveLocks();
   computeSpeech();
   await refresh(true);
+  if (state.pendingProject) setStatus("anaStatus", "JSONの素材と一致しません。動画の名前・サイズ・並び順を確認し、同じ素材を選び直してください。", true);
 }
 
 function computeSpeech() {
@@ -273,7 +353,9 @@ function renderClipList() {
     up.disabled = i === 0;
     down.disabled = i === state.clips.length - 1;
     const move = async (j) => {
+      if (editorLocked()) return;
       if (state.lines.length && !confirm("並び順を変えると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
+      await settle(); if (!save()) return;
       stop();
       const [c2] = state.clips.splice(i, 1);
       state.clips.splice(j, 0, c2);
@@ -282,7 +364,9 @@ function renderClipList() {
     up.onclick = () => move(i - 1);
     down.onclick = () => move(i + 1);
     del.onclick = async () => {
+      if (editorLocked()) return;
       if (state.lines.length && !confirm("素材を外すと、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
+      await settle(); if (!save()) return;
       stop();
       const [gone] = state.clips.splice(i, 1);
       URL.revokeObjectURL(gone.video.src);
@@ -307,7 +391,9 @@ function applySpeakers(segments) {
 }
 
 function analyze(onlySpeakers = false) {
-  if (!state.pcm) return;
+  if (!state.pcm || editorLocked() || deletingModels) return;
+  analysisRunning = true;
+  updateSaveLocks();
   $("btnAnalyze").disabled = $("btnDiarize").disabled = true;
   $("selModel").disabled = true;
   $("btnCancelAnalyze").hidden = false;
@@ -316,6 +402,8 @@ function analyze(onlySpeakers = false) {
   const device = "gpu" in navigator ? "webgpu" : "wasm";
   const files = {};
   const finish = () => {
+    analysisRunning = false;
+    updateSaveLocks();
     $("btnAnalyze").disabled = false;
     $("btnDiarize").disabled = !state.lines.length;
     $("selModel").disabled = false;
@@ -369,6 +457,7 @@ function analyze(onlySpeakers = false) {
 // ---------------------------------------------------------------- model → view
 let refreshTimer;
 function scheduleRefresh() {
+  recordEdit();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => refresh(false), 250);
 }
@@ -376,6 +465,7 @@ function scheduleRefresh() {
 // 作り直しは順番に1つずつ（途中で書き出しが始まって、古いテロップと新しいテロップが混ざらないように）
 let refreshChain = Promise.resolve();
 function refresh(rebuildTable) {
+  recordEdit();
   refreshChain = refreshChain.then(() => doRefresh(rebuildTable)).catch((e) => console.error(e));
   return refreshChain;
 }
@@ -398,10 +488,12 @@ async function doRefresh(rebuildTable) {
   const src = sourceDuration();
   $("cutSummary").textContent = `元の長さ ${fmt(src)} → カット後 ${fmt(total)}（${Math.round((1 - total / src) * 100)}% 短縮）`;
   if (rebuildTable) renderTable();
-  for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = !state.segs.length;
+  for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnAddLine"]) $(id).disabled = !state.segs.length;
+  $("btnSaveProject").disabled = !state.clips.length;
   $("btnDiarize").disabled = !state.lines.length;
   $("btnAuto").disabled = !state.lines.length;
   $("btnPremiere").disabled = !state.segs.length;
+  syncEditControls();
   save();
   if (!state.playing) await seekTo(state.t);
 }
@@ -653,12 +745,65 @@ function projectData() {
     files: state.clips.map((c) => ({ name: c.file.name, size: c.file.size })),
     settings: state.settings,
     lines: state.lines,
+    autoEdit: { mode: $("selMode").value, strength: $("selStrength").value },
   };
 }
 function save() {
-  if (state.clips.length) try { localStorage.setItem(projectKey(), JSON.stringify(projectData())); } catch { /* 容量不足など */ }
+  if (!state.clips.length || !activeSaveId || activeSaveKey !== projectKey()) return false;
+  recordEdit();
+  try {
+    const entry = projectStore.save(activeSaveKey, activeSaveId, projectData());
+    setStatus("projectStatus", `自動保存済み：${entry.name}`);
+    return true;
+  } catch (e) {
+    setStatus("projectStatus", `自動保存できません：${e.message}。「JSONに保存」でバックアップしてください。`, true);
+    return false;
+  }
 }
-function applyProject(p) {
+
+function updateSaveLocks() {
+  const locked = editorLocked();
+  for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave"]) $(id).disabled = locked || !activeSaveId;
+  $("inpProject").disabled = locked;
+  $("btnDeleteModels").disabled = locked || deletingModels || !("caches" in window);
+  syncEditControls();
+}
+
+function renderSaveControls() {
+  const group = activeSaveKey && projectStore.read(activeSaveKey);
+  if (!group) return;
+  $("selSave").replaceChildren(...group.entries.map(entry => Object.assign(document.createElement("option"), {
+    value: entry.id, textContent: entry.name,
+  })));
+  $("selSave").value = activeSaveId;
+  $("inpSaveName").value = group.entries.find(e => e.id === activeSaveId)?.name || "";
+  updateSaveLocks();
+}
+
+async function changeSave(action) {
+  if (editorLocked() || !activeSaveId) return;
+  projectTransition = true;
+  updateSaveLocks();
+  try {
+    stop();
+    await settle();
+    if (!save()) return; // 保存に失敗した編集を置き去りにしない。
+    const entry = action();
+    activeSaveId = entry.id;
+    state.t = 0;
+    applyProject(entry.project);
+    renderSaveControls();
+    await refresh(true);
+    setStatus("anaStatus", entry.project.lines.length ? `「${entry.name}」を開きました。` : `「${entry.name}」を新しく始めました。「解析する」で文字起こしを始められます。`);
+  } catch (e) {
+    setStatus("projectStatus", `セーブを切り替えられません：${e.message}`, true);
+  } finally {
+    projectTransition = false;
+    updateSaveLocks();
+  }
+}
+function applyProject(p, { keepHistory = false } = {}) {
+  $("autoStatus").textContent = "";
   const { design: oldDesign, ...s } = p.settings || {};
   // 話者ごとのデザイン。古い保存データ（デザイン1つだけ）は話者Aのデザインとして読み込む
   const sps = (s.speakers && s.speakers.length ? s.speakers : [{ id: "A", name: "話者A", design: oldDesign || speakers()[0].design }])
@@ -681,9 +826,20 @@ function applyProject(p) {
   $("inpGap").value = state.settings.gap;
   $("gapVal").textContent = `${Number(state.settings.gap).toFixed(2)}秒`;
   renderer.restyle();
+  delete $("selMode").dataset.touched;
   applyFormat();
+  if (["short", "long"].includes(p.autoEdit?.mode)) {
+    $("selMode").value = p.autoEdit.mode;
+    $("selMode").dataset.touched = "1";
+  }
+  $("selStrength").value = ["low", "mid", "high"].includes(p.autoEdit?.strength) ? p.autoEdit.strength : "mid";
   syncAudioUi();
   computeSpeech();
+  if (!keepHistory) {
+    editHistory.reset(editSnapshot());
+    $("editStatus").textContent = "";
+  }
+  syncEditControls();
 }
 
 function syncAudioUi() {
@@ -735,6 +891,7 @@ $("inpGap").oninput = (e) => {
   state.settings.gap = Number(e.target.value);
   $("gapVal").textContent = `${state.settings.gap.toFixed(2)}秒`;
   computeSpeech();
+  recordEdit();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => refresh(true), 200);
 };
@@ -778,17 +935,26 @@ $("btnPremiere").onclick = async () => {
   }
 };
 
-// おまかせ編集（押す前の状態を覚えておき、「元に戻す」で戻せる）
-let beforeAuto = null;
+// おまかせ編集も、ほかの編集と同じ履歴で取り消せる。
 $("btnAuto").onclick = async () => {
+  if (editorLocked()) return;
+  recordEdit();
+  historyApplying = true;
+  updateSaveLocks();
   stop();
-  beforeAuto = structuredClone(state.lines);
-  const n = autoEdit(state.lines, { mode: $("selMode").value, strength: $("selStrength").value, speakers: speakers() });
-  await refresh(true);
-  setStatus("autoStatus", `付けた演出：${describe(n)}。気に入らない行は表で直すか、「元に戻す」で戻せます。`);
-  $("btnUndoAuto").hidden = false;
+  try {
+    await settle();
+    const n = autoEdit(state.lines, { mode: $("selMode").value, strength: $("selStrength").value, speakers: speakers() });
+    editHistory.commit(editSnapshot());
+    await refresh(true);
+    setStatus("autoStatus", `付けた演出：${describe(n)}。気に入らない行は表で直すか、「元に戻す」で戻せます。`);
+  } finally {
+    historyApplying = false;
+    updateSaveLocks();
+  }
 };
-$("selMode").onchange = (e) => { e.target.dataset.touched = "1"; };
+$("selMode").onchange = (e) => { e.target.dataset.touched = "1"; save(); };
+$("selStrength").onchange = () => save();
 
 // デザインセット：字幕のデザイン（全話者）と、演出の見た目をまとめて切り替える
 $("selSet").onchange = (e) => {
@@ -814,14 +980,13 @@ $("selSet").onchange = (e) => {
 };
 $("setNote").textContent = DESIGN_SETS.standard.note;
 $("chkHighlight").onchange = (e) => { state.settings.autoHighlight = e.target.checked; refresh(false); };
-$("btnUndoAuto").onclick = async () => {
-  if (!beforeAuto) return;
-  state.lines = beforeAuto;
-  beforeAuto = null;
-  $("btnUndoAuto").hidden = true;
-  await refresh(true);
-  setStatus("autoStatus", "おまかせ編集の前に戻しました。");
-};
+$("btnUndoEdit").onclick = () => historyAction(() => editHistory.undo(), "1つ前の編集に戻しました。");
+$("btnRedoEdit").onclick = () => historyAction(() => editHistory.redo(), "取り消した編集をやり直しました。");
+$("btnResetSubtitles").onclick = () => historyAction(() => {
+  const snapshot = resetSubtitles(editSnapshot(), DEFAULT_DESIGN);
+  editHistory.commit(snapshot);
+  return snapshot;
+}, "字幕のデザイン・演出・画面効果・カット指定を初期化しました。文章は残っています。元に戻すこともできます。");
 
 // 字幕デザイン：保存・読み込み・標準にする・初期に戻す
 // 1人分のファイル = デザインそのもの / 全員分のファイル = { speakers: [{ name, design }] }
@@ -879,22 +1044,85 @@ $("btnSrt").onclick = async () => {
   await settle();
   download(new Blob([toSrt(state.lines, state.segs)], { type: "text/plain" }), baseName() + ".srt");
 };
-$("btnSaveProject").onclick = () => download(new Blob([JSON.stringify(projectData(), null, 1)], { type: "application/json" }), baseName() + "_telop.json");
+$("btnOpenSave").onclick = () => {
+  const id = $("selSave").value;
+  return changeSave(() => projectStore.select(activeSaveKey, id));
+};
+$("btnNewSave").onclick = () => changeSave(() => projectStore.create(activeSaveKey, {
+  version: 2, files: projectData().files, settings: defaultSettings(), lines: [],
+}));
+$("btnCopySave").onclick = () => changeSave(() => projectStore.create(activeSaveKey, projectData()));
+$("inpSaveName").onchange = () => {
+  if (analysisRunning || projectTransition || !activeSaveId) return;
+  try {
+    const entry = projectStore.save(activeSaveKey, activeSaveId, projectData(), $("inpSaveName").value);
+    renderSaveControls();
+    setStatus("projectStatus", `自動保存済み：${entry.name}`);
+  } catch (e) { setStatus("projectStatus", `名前を保存できません：${e.message}`, true); }
+};
+$("btnSaveProject").onclick = async () => {
+  await settle();
+  download(new Blob([JSON.stringify(projectData(), null, 1)], { type: "application/json" }), baseName() + "_telop.json");
+};
 $("inpProject").onchange = async (e) => {
   const f = e.target.files[0];
   if (!f) return;
-  const p = JSON.parse(await f.text());
-  if (state.clips.length) {
-    applyProject(p);
-    await refresh(true);
-  } else {
-    state.pendingProject = p;
-    const names = (p.files || (p.file ? [p.file] : [])).map((x) => x.name).join("、");
-    setStatus("anaStatus", `作業を読み込みました。同じ素材（${names}）を選んでください。`);
+  try {
+    const p = validateProject(JSON.parse(await f.text()));
+    if (state.clips.length && sameFiles(projectFiles(p), projectData().files)) {
+      await changeSave(() => projectStore.create(activeSaveKey, p));
+    } else {
+      state.pendingProject = p;
+      const names = projectFiles(p).map(x => x.name).join("、");
+      setStatus("anaStatus", `JSONを読み込みました。同じ素材（${names}）を同じ順番で選んでください。別セーブとして開きます。`);
+    }
+  } catch (err) {
+    setStatus("anaStatus", `作業を読み込めません：${err.message}`, true);
+  } finally {
+    e.target.value = "";
+  }
+};
+
+async function showModelCache() {
+  try {
+    const entries = await modelCacheEntries(window.caches);
+    setStatus("modelStatus", entries.length ? `このブラウザにモデル関連ファイルが ${entries.length} 件保存されています。` : "このブラウザには、このツールの保存済みモデルはありません。");
+  } catch (e) { setStatus("modelStatus", `保存状況を確認できません：${e.message}`, true); }
+}
+$("modelStorage").ontoggle = () => { if ($("modelStorage").open) showModelCache(); };
+$("btnDeleteModels").onclick = async () => {
+  if (analysisRunning || projectTransition || deletingModels || document.body.classList.contains("busy")) return;
+  if (!confirm("このツールの保存済みAIモデルを削除します。セーブデータと元の動画は残ります。次回の解析ではモデルを再ダウンロードします。続けますか？")) return;
+  deletingModels = true;
+  $("btnAnalyze").disabled = $("btnDiarize").disabled = true;
+  updateSaveLocks();
+  try {
+    worker?.terminate();
+    worker = null;
+    const count = await deleteModelCache(window.caches);
+    setStatus("modelStatus", count ? `${count} 件のモデル関連ファイルを削除しました。次の解析で再ダウンロードします。` : "削除する保存済みモデルはありません。");
+  } catch (err) { setStatus("modelStatus", `削除できません：${err.message}`, true); }
+  finally {
+    deletingModels = false;
+    $("btnAnalyze").disabled = !state.pcm;
+    $("btnDiarize").disabled = !state.lines.length;
+    updateSaveLocks();
   }
 };
 document.addEventListener("keydown", (e) => {
   if (document.body.classList.contains("busy")) return;
+  const el = document.activeElement;
+  const typing = el?.isContentEditable || el?.tagName === "TEXTAREA" ||
+    (el?.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit"].includes(el.type));
+  if (!typing && !e.isComposing && !e.altKey && (e.ctrlKey || e.metaKey)) {
+    const key = e.key.toLowerCase();
+    if (key === "z" || key === "y") {
+      e.preventDefault();
+      const redo = key === "y" || e.shiftKey;
+      historyAction(() => redo ? editHistory.redo() : editHistory.undo(), redo ? "取り消した編集をやり直しました。" : "1つ前の編集に戻しました。");
+      return;
+    }
+  }
   if (e.code === "Space" && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName) && state.segs.length) {
     e.preventDefault();
     state.playing ? stop() : play();
