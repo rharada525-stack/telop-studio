@@ -40,17 +40,17 @@
         <span id="fileLabel">話している動画を選ぶ（複数まとめてOK・ドロップでも可）</span>
       </label>
       <ol id="clipList" class="clip-list" hidden></ol>
-      <section class="save-manager" id="saveManager" aria-label="セーブデータ" hidden>
-        <h3>この動画のセーブデータ</h3>
-        <p class="hint">編集中のデータに自動保存します。新しく始めても、前のセーブは残ります。</p>
+      <section class="save-manager" id="saveManager" aria-label="プロジェクト" hidden>
+        <h3>この動画のプロジェクト</h3>
+        <p class="hint">編集中のプロジェクトに自動保存します。新しく始めても、前のプロジェクトは残ります。</p>
         <div class="row">
-          <label>保存した編集を選ぶ<select id="selSave"></select></label>
+          <label>プロジェクトを選ぶ<select id="selSave"></select></label>
           <button id="btnOpenSave" class="ghost" type="button">続きから開く</button>
         </div>
-        <label class="save-name">編集中のセーブ名<input id="inpSaveName" type="text" maxlength="60"></label>
+        <label class="save-name">プロジェクト名<input id="inpSaveName" type="text" maxlength="60"></label>
         <div class="save-actions">
           <button id="btnNewSave" class="ghost" type="button">新しく始める</button>
-          <button id="btnCopySave" class="ghost" type="button">今の編集を別セーブに複製</button>
+          <button id="btnCopySave" class="ghost" type="button">プロジェクトを複製</button>
         </div>
         <p class="status" id="projectStatus" role="status"></p>
         <p class="hint save-note">動画本体は保存しません。次回は同じ動画を読み込んで再開できます。別のPCへの移動やバックアップには「JSONに保存」を使ってください。</p>
@@ -99,7 +99,7 @@
       <p class="hint" id="modelHelp">まずは高精度でお試しください。動作が重い・解析に失敗する場合は、低スペックモードで解析し直せます（精度は下がります）。</p>
       <details class="model-storage" id="modelStorage">
         <summary>ダウンロード済みAIモデルの管理</summary>
-        <p class="hint">モデルは、このサイトを開いたブラウザ内に保存されます。削除後は、次の解析で必要なモデルを再ダウンロードします。セーブデータや元の動画は残ります。</p>
+        <p class="hint">モデルは、このサイトを開いたブラウザ内に保存されます。削除後は、次の解析で必要なモデルを再ダウンロードします。プロジェクトや元の動画は残ります。</p>
         <button id="btnDeleteModels" class="ghost" type="button">このツールのAIモデルを削除</button>
         <p class="status" id="modelStatus" role="status"></p>
       </details>

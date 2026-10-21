@@ -311,7 +311,7 @@ async function clipsChanged(fromAdd) {
     const key = projectKey();
     const group = projectStore.open(key, projectData());
     let entry = group.entries.find(e => e.id === group.activeId);
-    // 明示的に開いたJSONを、前回の自動保存より優先する。別セーブとして保存する。
+    // 明示的に開いたJSONを、前回の自動保存より優先する。別プロジェクトとして保存する。
     if (fromAdd && state.pendingProject && sameFiles(projectFiles(state.pendingProject), projectData().files)) {
       entry = projectStore.create(key, state.pendingProject);
       state.pendingProject = null;
@@ -796,7 +796,7 @@ async function changeSave(action) {
     await refresh(true);
     setStatus("anaStatus", entry.project.lines.length ? `「${entry.name}」を開きました。` : `「${entry.name}」を新しく始めました。「解析する」で文字起こしを始められます。`);
   } catch (e) {
-    setStatus("projectStatus", `セーブを切り替えられません：${e.message}`, true);
+    setStatus("projectStatus", `プロジェクトを切り替えられません：${e.message}`, true);
   } finally {
     projectTransition = false;
     updateSaveLocks();
@@ -1074,7 +1074,7 @@ $("inpProject").onchange = async (e) => {
     } else {
       state.pendingProject = p;
       const names = projectFiles(p).map(x => x.name).join("、");
-      setStatus("anaStatus", `JSONを読み込みました。同じ素材（${names}）を同じ順番で選んでください。別セーブとして開きます。`);
+      setStatus("anaStatus", `JSONを読み込みました。同じ素材（${names}）を同じ順番で選んでください。別プロジェクトとして開きます。`);
     }
   } catch (err) {
     setStatus("anaStatus", `作業を読み込めません：${err.message}`, true);
@@ -1092,7 +1092,7 @@ async function showModelCache() {
 $("modelStorage").ontoggle = () => { if ($("modelStorage").open) showModelCache(); };
 $("btnDeleteModels").onclick = async () => {
   if (analysisRunning || projectTransition || deletingModels || document.body.classList.contains("busy")) return;
-  if (!confirm("このツールの保存済みAIモデルを削除します。セーブデータと元の動画は残ります。次回の解析ではモデルを再ダウンロードします。続けますか？")) return;
+  if (!confirm("このツールの保存済みAIモデルを削除します。プロジェクトと元の動画は残ります。次回の解析ではモデルを再ダウンロードします。続けますか？")) return;
   deletingModels = true;
   $("btnAnalyze").disabled = $("btnDiarize").disabled = true;
   updateSaveLocks();
