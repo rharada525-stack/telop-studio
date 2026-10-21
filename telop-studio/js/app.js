@@ -58,7 +58,7 @@ let editGroupId = 0;
 
 function editSnapshot() {
   const p = projectData();
-  return { settings: p.settings, lines: p.lines, autoEdit: p.autoEdit };
+  return { settings: p.settings, lines: p.lines, words: p.words, autoEdit: p.autoEdit };
 }
 function editorLocked() { return analysisRunning || projectTransition || historyApplying || $("deleteProjectDialog").open || document.body.classList.contains("busy"); }
 function syncEditControls() {
