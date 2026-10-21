@@ -40,20 +40,12 @@
         <span id="fileLabel">話している動画を選ぶ（複数まとめてOK・ドロップでも可）</span>
       </label>
       <ol id="clipList" class="clip-list" hidden></ol>
-      <div class="row">
+      <div class="source-settings">
         <label>出力の形
           <select id="selAspect">
             <option value="portrait">縦 9:16（ショート・リール・TikTok）</option>
             <option value="landscape">横 16:9（YouTube など）</option>
           </select>
-        </label>
-        <label>テロップのデザインセット
-          <select id="selSet">
-            <option value="standard">標準（テレビ風）</option>
-            <option value="entertainment">エンタメ切り抜き風（ショート向け）</option>
-            <option value="business">ビジネス講義風（長尺向け）</option>
-          </select>
-          <small id="setNote" class="set-note"></small>
         </label>
         <label>画面の合わせ方
           <select id="selLayout">
@@ -62,7 +54,16 @@
             <option value="fit">全体を表示＋ぼかし背景（縦横が違う素材）</option>
           </select>
         </label>
-        <label>タイトル帯（空なら出さない）
+        <div class="design-set-field">
+          <label for="selSet">テロップのデザインセット</label>
+          <select id="selSet" aria-describedby="setNote">
+            <option value="standard">標準（テレビ風）</option>
+            <option value="entertainment">エンタメ切り抜き風（ショート向け）</option>
+            <option value="business">ビジネス講義風（長尺向け）</option>
+          </select>
+          <p id="setNote" class="set-note"></p>
+        </div>
+        <label class="title-field">タイトル帯（空なら出さない）
           <input id="inpTitle" type="text" placeholder="例：コンビニコーヒー裏ワザ">
         </label>
       </div>
