@@ -4,7 +4,8 @@ export const MODEL_CACHE = 'transformers-cache';
 export function isToolModel(request) {
   const url = new URL(typeof request === 'string' ? request : request.url);
   return url.protocol === 'https:' && ['huggingface.co', 'hf.co'].includes(url.hostname) &&
-    /^\/onnx-community\/(whisper-base|whisper-small|whisper-large-v3-turbo|pyannote-segmentation-3\.0)\/resolve\//.test(url.pathname);
+    // _timestamped は 1語ごとの時刻を出せる版（自動カットの発話保護に使う）
+    /^\/onnx-community\/((whisper-base|whisper-small|whisper-large-v3-turbo)(_timestamped)?|pyannote-segmentation-3\.0)\/resolve\//.test(url.pathname);
 }
 
 export async function modelCacheEntries(storage) {

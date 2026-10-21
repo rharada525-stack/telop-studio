@@ -20,17 +20,22 @@ export async function toMono16k(buffer) {
   return (await off.startRendering()).getChannelData(0);
 }
 
-// 20ms ごとの音量(dB)
+// 20ms ごとの音量(dB)。rms = 平均の大きさ、peak = 瞬間の最大（短い子音を拾うため）
 export function loudness(pcm16k) {
   const hop = 320;
   const n = Math.floor(pcm16k.length / hop);
-  const db = new Float32Array(n);
+  const rms = new Float32Array(n), peak = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    let s = 0;
-    for (let j = i * hop; j < (i + 1) * hop; j++) s += pcm16k[j] * pcm16k[j];
-    db[i] = 10 * Math.log10(s / hop + 1e-10);
+    let s = 0, p = 0;
+    for (let j = i * hop; j < (i + 1) * hop; j++) {
+      const v = pcm16k[j];
+      s += v * v;
+      if (Math.abs(v) > p) p = Math.abs(v);
+    }
+    rms[i] = 10 * Math.log10(s / hop + 1e-10);
+    peak[i] = 20 * Math.log10(p + 1e-10);
   }
-  return db;
+  return { rms, peak };
 }
 
 const pct = (arr, p) => {
@@ -38,33 +43,71 @@ const pct = (arr, p) => {
   return s[Math.min(s.length - 1, Math.floor(s.length * p))];
 };
 
-// しゃべっている区間を返す。gap: これより短い無音は詰めずに残す（秒）
-export function detectSpeech(db, { gap = 0.3, padBefore = 0.1, padAfter = 0.14, sensitivity = 0 } = {}) {
-  const fr = 0.02;
-  const floor = pct(db, 0.1), peak = pct(db, 0.99);
-  const thr = Math.max(floor + 12, peak - 35) - sensitivity;
-  const regions = [];
-  let st = -1;
-  for (let i = 0; i <= db.length; i++) {
-    const on = i < db.length && db[i] > thr;
-    if (on && st < 0) st = i;
-    if (!on && st >= 0) { regions.push([st * fr, i * fr]); st = -1; }
-  }
-  const merged = [];
-  for (const r of regions) {
-    const last = merged[merged.length - 1];
-    if (last && r[0] - last[1] < gap) last[1] = r[1];
-    else merged.push([...r]);
-  }
-  const dur = db.length * fr;
+// 自動カットの設定（Premiere 用プラグイン EditKit と同じ考え方）
+//   minimum: これより長い無言だけをカットする（秒）
+//   tail: 話し終わりのあとに残す余白、lead: 話し始めの前に残す余白
+//   thresholdDb: これより小さい音を無音とみなす（瞬間の音量は +12dB まで声として扱う）
+export const CUT_PRESETS = {
+  solo: { name: "1人で話す", minimum: 0.6, tail: 0.15, lead: 0.1, thresholdDb: -42 },
+  dialogue: { name: "会話・対談", minimum: 1.0, tail: 0.25, lead: 0.2, thresholdDb: -42 },
+  variety: { name: "バラエティ（間を残す）", minimum: 1.5, tail: 0.4, lead: 0.3, thresholdDb: -42 },
+};
+
+const mergeRanges = (ranges) => {
   const out = [];
-  for (const [a, b] of merged.filter(([a, b]) => b - a >= 0.12)) {
-    const s = Math.max(0, a - padBefore), e = Math.min(dur, b + padAfter);
+  for (const r of [...ranges].sort((a, b) => a.start - b.start)) {
     const last = out[out.length - 1];
-    if (last && s <= last.end) last.end = e;
-    else out.push({ start: s, end: e });
+    if (last && r.start <= last.end + 1e-8) last.end = Math.max(last.end, r.end);
+    else out.push({ start: r.start, end: r.end });
   }
   return out;
+};
+
+// 残す区間（しゃべっている所）を返す。
+// 声と判定する所：平均の音量がしきい値を超える、または瞬間の音量がしきい値+12dB を超える。
+// 文字起こしの単語（前後 0.05 秒）も必ず声として残す（小さな声や語尾を切らないための保護）。
+// 声と声の間の無言が minimum 以上のときだけ、tail/lead の余白を残してカットする。
+export function detectSpeech(levels, opts = {}, words = []) {
+  const o = { ...CUT_PRESETS.solo, ...opts };
+  const fr = 0.02;
+  const rms = levels.rms || levels, peak = levels.peak || levels;
+  const dur = rms.length * fr;
+  // 雑音が大きい素材では、雑音を声と取り違えないよう基準を少し上げる
+  const floor = pct(rms, 0.1);
+  const thr = floor > o.thresholdDb - 6 ? floor + 6 : o.thresholdDb;
+  const speech = [];
+  let st = -1;
+  for (let i = 0; i <= rms.length; i++) {
+    const on = i < rms.length && (rms[i] > thr || peak[i] > thr + 12);
+    if (on && st < 0) st = i;
+    if (!on && st >= 0) { speech.push({ start: st * fr, end: i * fr }); st = -1; }
+  }
+  for (const w of words) {
+    const s = Array.isArray(w) ? w[0] : w.start, e = Array.isArray(w) ? w[1] : w.end;
+    if (Number.isFinite(s) && Number.isFinite(e) && e > s) speech.push({ start: Math.max(0, s - 0.05), end: Math.min(dur, e + 0.05) });
+  }
+  const voice = mergeRanges(speech);
+  // カットする無言（余白を残した後の範囲）
+  const cuts = [];
+  let pos = 0;
+  for (const v of [...voice, { start: dur, end: dur }]) {
+    const gap = v.start - pos;
+    if (gap >= o.minimum) {
+      const a = pos === 0 ? 0 : pos + o.tail; // 先頭の無言は話し始めの余白だけ残す
+      const b = v.start >= dur ? dur : v.start - o.lead;
+      if (b - a > 0.02) cuts.push({ start: a, end: b });
+    }
+    pos = Math.max(pos, v.end);
+  }
+  // 残す区間 = 全体 − カット
+  const keep = [];
+  let cur = 0;
+  for (const c of cuts) {
+    if (c.start - cur > 0.02) keep.push({ start: cur, end: c.start });
+    cur = c.end;
+  }
+  if (dur - cur > 0.02) keep.push({ start: cur, end: dur });
+  return keep;
 }
 
 // ---------------------------------------------------------------- subtitles
@@ -126,7 +169,146 @@ export function wrapLine(text, max = 13) {
   return chars.slice(0, at).join("").replace(/[、,]$/u, "") + "\n" + chars.slice(at).join("");
 }
 
-// Whisper の区間を字幕1枚ずつに分け、しゃべっている時間に比例して時刻を割り振る
+// ---------------------------------------------------------------- words → subtitles
+// Whisper の単語（{ text, timestamp: [開始, 終了] }）を、保存用の [開始, 終了, 文字] にそろえる
+export function normalizeWords(raw, duration) {
+  const out = [];
+  for (const w of raw || []) {
+    const text = (w.text || "").replace(/\s+/g, "");
+    let [s, e] = w.timestamp || [];
+    if (!text || !Number.isFinite(s)) continue;
+    if (!Number.isFinite(e) || e <= s) e = Math.min(duration, s + 0.3);
+    out.push([Math.max(0, s), Math.min(duration, e), text]);
+  }
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+const SENT_END = /[。！？!?]$/;
+const PAUSE_BREAK = 0.45; // これ以上の間があれば字幕を分ける（秒）
+
+// 単語の時刻をそのまま使って字幕を作る（言った瞬間に出て、言い終わりで消える）
+export function buildLinesFromWords(words) {
+  const lines = [];
+  let buf = [];
+  const emit = (n = buf.length) => {
+    const part = buf.slice(0, n);
+    buf = buf.slice(n);
+    let text = part.map((w) => w[2]).join("");
+    const count = (re) => (text.match(re) || []).length;
+    if (count(/「/g) !== count(/」/g)) text = text.replace(/[「」]/g, "");
+    text = text.replace(/[。、,]$/u, "");
+    if (text.trim()) lines.push({ id: crypto.randomUUID(), src: [part[0][0], part[part.length - 1][1]], text, cut: false, fx: "", fxText: "" });
+  };
+  const chars = () => buf.map((w) => w[2]).join("");
+  words.forEach((w, i) => {
+    buf.push(w);
+    const next = words[i + 1];
+    const len = [...chars()].length;
+    if (SENT_END.test(w[2]) || (/[、,]$/.test(w[2]) && len >= 8)) return emit();
+    if (next && next[0] - w[1] >= PAUSE_BREAK && len >= 4) return emit();
+    if (len >= HARD_MAX) {
+      // 単語の切れ目のうち、日本語として自然な所で分ける
+      let best = buf.length - 1, bestScore = -Infinity, pos = 0;
+      for (let k = 1; k < buf.length; k++) {
+        pos += [...buf[k - 1][2]].length;
+        const cs = [...chars()];
+        const s = breakScore(cs, pos) - Math.abs(pos - SOFT_MAX) * 0.8;
+        if (s > bestScore && pos >= 6) { bestScore = s; best = k; }
+      }
+      emit(best);
+    }
+  });
+  if (buf.length) emit();
+  return lines;
+}
+
+// ---------------------------------------------------------------- retake hints
+// 言い直し・繰り返し・中断の言葉を見つける（Premiere 用プラグイン EditKit と同じ判定）。
+// お知らせだけで、自動ではカットしない。
+const RETAKE = { lookAhead: 20, headChars: 10, headMatch: 5, prefixMatch: 5, fragmentPrefix: 3, repeatChars: 8, repeatGap: 15 };
+const STALL = /ちょっと待って|もう一回|もう一度|撮り直|言い直|やり直|間違え|すみません|ごめんなさい/;
+const PUNCT = /[\s、。，．,.！？!?「」『』…]/;
+
+export function retakeHints(words, voiceOf = () => "") {
+  const groups = [];
+  let current = null;
+  for (const [start, end, text] of words) {
+    const voice = voiceOf(start);
+    if (!current || start - current.end > 0.7 || current.voice !== voice) {
+      current = { start, end, text: "", voice, words: [] };
+      groups.push(current);
+    }
+    current.text += text;
+    current.end = end;
+    current.words.push({ start, end, text });
+    if (/[。！？!?]$/.test(text)) current = null;
+  }
+  for (const g of groups) {
+    g.chars = [];
+    for (const w of g.words) for (const ch of w.text) if (!PUNCT.test(ch)) g.chars.push({ ch, word: w });
+    g.clean = g.chars.map((c) => c.ch).join("");
+  }
+  const longestCommon = (x, y) => {
+    let best = 0;
+    for (let i = 0; i < x.length; i++) for (let j = 0; j < y.length; j++) {
+      let n = 0;
+      while (i + n < x.length && j + n < y.length && x[i + n] === y[j + n]) n++;
+      if (n > best) best = n;
+    }
+    return best;
+  };
+  const restartsAs = (a, b) => {
+    const x = a.clean, y = b.clean;
+    let shared = 0;
+    while (shared < Math.min(x.length, y.length) && x[shared] === y[shared]) shared++;
+    if (shared >= RETAKE.prefixMatch) return true;
+    if (shared >= RETAKE.fragmentPrefix && x.length <= shared + 2) return true; // 「2つ目。」→「2つ目が…」
+    return longestCommon(x.slice(0, RETAKE.headChars), y.slice(0, RETAKE.headChars)) >= RETAKE.headMatch;
+  };
+  const hints = [], covered = [];
+  const push = (h) => { hints.push(h); covered.push([h.start, h.end]); };
+  const isCovered = (s, e) => covered.some(([a, b]) => s < b && e > a);
+  // 1) 同じ出だしで言い直している（前の方を消す候補）
+  for (let i = 0; i < groups.length - 1; i++) {
+    const a = groups[i];
+    for (let j = i + 1; j < groups.length; j++) {
+      const b = groups[j];
+      if (b.start - a.end > RETAKE.lookAhead) break;
+      if (a.voice !== b.voice || b.start < a.end || !restartsAs(a, b)) continue;
+      const taken = groups.slice(i, j);
+      const stalled = taken.some((g) => STALL.test(g.text));
+      push({ type: "retake", start: a.start, end: groups[j - 1].end, text: taken.map((g) => g.text).join(""), retained: b.text,
+        reason: "同じ内容を話し直している可能性があります。" + (stalled ? "途中に中断の言葉もあります。" : "") });
+      i = j - 1;
+      break;
+    }
+  }
+  // 2) 同じ言い回しを続けて繰り返している
+  groups.forEach((g) => {
+    const x = g.clean;
+    let best = null;
+    for (let p = 0; p < x.length; p++) for (let q = p + RETAKE.repeatChars; q < x.length; q++) {
+      let n = 0;
+      while (q + n < x.length && p + n < q && x[p + n] === x[q + n]) n++;
+      if (n >= RETAKE.repeatChars && q - (p + n) <= RETAKE.repeatGap && (!best || n > best.n)) best = { p, q, n };
+    }
+    if (!best) return;
+    const first = g.chars[best.p].word, second = g.chars[best.q].word;
+    const before = g.words[g.words.indexOf(second) - 1];
+    if (!before || before.end <= first.start || isCovered(first.start, before.end)) return;
+    push({ type: "repeat", start: first.start, end: before.end, text: x.slice(best.p, best.q), retained: x.slice(best.q, best.q + best.n),
+      reason: "同じ言い回しを続けて繰り返している可能性があります。" });
+  });
+  // 3) 「ちょっと待って」「撮り直し」など中断の言葉
+  groups.forEach((g, i) => {
+    if (!STALL.test(g.text) || isCovered(g.start, g.end)) return;
+    push({ type: "stall", start: g.start, end: g.end, text: g.text, retained: groups[i + 1]?.text || "",
+      reason: "「ちょっと待って」など、中断や言い直しの言葉があります。" });
+  });
+  return hints.sort((a, b) => a.start - b.start);
+}
+
+// （旧方式）Whisper の区間を字幕1枚ずつに分け、しゃべっている時間に比例して時刻を割り振る
 export function buildLines(chunks, speech, duration) {
   const lines = [];
   chunks.forEach((c, ci) => {

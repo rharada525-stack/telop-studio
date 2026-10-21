@@ -2,6 +2,7 @@ import { resolveStyles } from "./telop.js";
 import { Renderer } from "./render.js";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
+  CUT_PRESETS, normalizeWords, buildLinesFromWords, retakeHints,
   totalDuration, srcToOut, outToSrc, toSrt, FX, FX_POS, SCREEN, FRAME, layoutClips, splitAtClips, clipAt, assignSpeakers,
 } from "./timeline.js";
 import { mixAudio, exportMp4 } from "./export.js";
@@ -35,7 +36,8 @@ const state = {
 };
 function defaultSettings() {
   return {
-    title: "", layout: "auto", gap: 0.3, aspect: "portrait",
+    title: "", layout: "auto", aspect: "portrait",
+    cutPreset: "solo", minSilence: 0.6, // 自動カット（Premiere 用プラグイン EditKit と同じ判定）
     autoHighlight: true, // 字幕の大事な言葉を自動で強調色にする
     designSet: "standard", // デザインセット
     fxMap: {},             // デザインセットによる演出の見た目の差し替え
@@ -270,7 +272,8 @@ async function loadClip(file, status) {
   else if (file.size > 800e6) throw new Error("この形式の大きいファイルには対応していません。MP4 か MOV を使ってください。");
   else audio = await decodeAudio(file);
   const pcm = await toMono16k(audio);
-  return { id: crypto.randomUUID(), file, media, video, audio, pcm, db: loudness(pcm), duration: media ? media.duration : audio.duration };
+  const lv = loudness(pcm);
+  return { id: crypto.randomUUID(), file, media, video, audio, pcm, db: lv.rms, pk: lv.peak, duration: media ? media.duration : audio.duration };
 }
 
 // 素材の並び・数が変わったとき：つないだ音声を作り直す
@@ -283,7 +286,7 @@ async function clipsChanged(fromAdd) {
   $("dropzone").classList.toggle("loaded", has);
   $("btnAnalyze").disabled = !has;
   if (!has) {
-    Object.assign(state, { db: null, pcm: null, speech: [], lines: [], segs: [], items: [] });
+    Object.assign(state, { db: null, pk: null, pcm: null, words: [], speech: [], lines: [], segs: [], items: [] });
     await renderer.setItems([]);
     renderTable();
     editHistory.reset(editSnapshot());
@@ -298,12 +301,15 @@ async function clipsChanged(fromAdd) {
   const total = layoutClips(state.clips);
   const nFr = Math.round(total / FRAME);
   state.db = new Float32Array(nFr).fill(-100);
+  state.pk = new Float32Array(nFr).fill(-100);
   state.pcm = new Float32Array(Math.round(total * 16000));
   for (const c of state.clips) {
     state.db.set(c.db.subarray(0, Math.round(c.span / FRAME)), Math.round(c.offset / FRAME));
+    state.pk.set(c.pk.subarray(0, Math.round(c.span / FRAME)), Math.round(c.offset / FRAME));
     state.pcm.set(c.pcm.subarray(0, Math.round(c.span * 16000)), Math.round(c.offset * 16000));
   }
   state.lines = [];
+  state.words = [];
   state.t = 0;
   editHistory.reset(editSnapshot());
   syncEditControls();
@@ -334,8 +340,15 @@ async function clipsChanged(fromAdd) {
   if (state.pendingProject) setStatus("anaStatus", "JSONの素材と一致しません。動画の名前・サイズ・並び順を確認し、同じ素材を選び直してください。", true);
 }
 
+// 自動カットの設定（プリセット + 「これより長い無言だけ切る」の秒数）
+function cutOptions() {
+  const p = CUT_PRESETS[state.settings.cutPreset] || CUT_PRESETS.solo;
+  return { ...p, minimum: Number(state.settings.minSilence) || p.minimum };
+}
+
 function computeSpeech() {
-  if (state.db) state.speech = splitAtClips(detectSpeech(state.db, { gap: state.settings.gap }), state.clips);
+  // 文字起こし済みなら、単語を話している所は必ず残す（発話保護）
+  if (state.db) state.speech = splitAtClips(detectSpeech({ rms: state.db, peak: state.pk || state.db }, cutOptions(), state.words || []), state.clips);
   computeVoiceGain();
 }
 
@@ -433,9 +446,19 @@ function analyze(onlySpeakers = false) {
       setStatus("anaStatus", m.text);
       if (m.text.startsWith("文字起こし") || m.text.startsWith("話者を判別")) showProgress("anaProgress", -1);
     } else if (m.type === "done") {
-      computeSpeech();
-      state.lines = buildLines(m.chunks, state.speech, state.pcm.length / 16000);
+      const dur = state.pcm.length / 16000;
+      if (m.words) {
+        // 1語ごとの時刻：字幕のタイミングに使い、話している所はカットしないよう保護する
+        state.words = normalizeWords(m.words, dur);
+        computeSpeech();
+        state.lines = buildLinesFromWords(state.words);
+      } else {
+        computeSpeech();
+        state.lines = buildLines(m.chunks, state.speech, dur);
+      }
+      const hints = state.words.length ? retakeHints(state.words, (t) => clipAt(state.clips, t)).length : 0;
       let msg = `完了：字幕 ${state.lines.length} 枚。下の「✨ おまかせ編集」で演出を自動で付けられます`;
+      if (hints) msg += `・言い直しの可能性 ${hints} か所（表に「言い直し?」の印）`;
       if (m.segments) msg += `・話者 ${applySpeakers(m.segments)} 人を判別（間違いは表の「話者」で直せます）`;
       finish();
       setStatus("anaStatus", msg);
@@ -504,6 +527,9 @@ function renderTable() {
   const toOpts = (o) => Object.entries(o).map(([k, v]) => `<option value="${k}">${typeof v === "string" ? v : v.name}</option>`).join("");
   const opts = toOpts(FX), posOpts = toOpts(FX_POS), scrOpts = toOpts(SCREEN);
   const multi = state.clips.length > 1;
+  // 言い直しの候補（お知らせだけ。カットするかは本人が決める）
+  const hints = state.words?.length ? retakeHints(state.words, (t) => clipAt(state.clips, t)) : [];
+  const HINT_LABEL = { retake: "言い直し?", repeat: "繰り返し?", stall: "中断?" };
   let lastClip = -1;
   for (const l of state.lines) {
     const ci = clipAt(state.clips, l.src[0]);
@@ -554,6 +580,18 @@ function renderTable() {
     cb.checked = l.cut;
     tr.classList.toggle("is-cut", l.cut);
     cb.onchange = async () => { l.cut = cb.checked; await refresh(true); };
+    // 行の半分以上が候補の範囲に入っていれば印を付ける
+    const hint = hints.find((h) => Math.min(h.end, l.src[1]) - Math.max(h.start, l.src[0]) >= (l.src[1] - l.src[0]) * 0.5);
+    if (hint) {
+      const hb = document.createElement("button");
+      hb.className = "retake-hint";
+      hb.textContent = HINT_LABEL[hint.type] || "言い直し?";
+      hb.title = `${hint.reason}${hint.retained ? `
+残す方：「${hint.retained}」` : ""}
+クリックでこの行をカット／元に戻す`;
+      hb.onclick = async () => { l.cut = !l.cut; await refresh(true); };
+      tr.querySelector(".time").appendChild(hb);
+    }
     tb.appendChild(tr);
   }
 }
@@ -705,7 +743,7 @@ async function doExport() {
   }
   const btn = $("btnExport");
   // 書き出し中に設定や字幕が変わると映像が崩れるので、操作をロックする
-  const locked = [btn, $("selAspect"), $("selLayout"), $("inpTitle"), $("inpGap"), $("btnAnalyze"), $("btnAddLine"), $("inpVideo"), $("btnPlay"), $("seek")];
+  const locked = [btn, $("selAspect"), $("selLayout"), $("inpTitle"), $("inpGap"), $("selCutPreset"), $("btnAnalyze"), $("btnAddLine"), $("inpVideo"), $("btnPlay"), $("seek")];
   locked.forEach((el) => (el.disabled = true));
   document.body.classList.add("busy");
   const suffix = state.settings.aspect === "landscape" ? "_telop_16x9.mp4" : "_telop.mp4";
@@ -745,6 +783,7 @@ function projectData() {
     files: state.clips.map((c) => ({ name: c.file.name, size: c.file.size })),
     settings: state.settings,
     lines: state.lines,
+    words: state.words || [], // 1語ごとの時刻 [開始, 終了, 文字]（発話保護と言い直し検知に使う）
     autoEdit: { mode: $("selMode").value, strength: $("selStrength").value },
   };
 }
@@ -816,6 +855,7 @@ function applyProject(p, { keepHistory = false } = {}) {
   };
   if (!sps.some((sp) => sp.id === state.editSpeaker)) state.editSpeaker = sps[0].id;
   state.lines = p.lines || [];
+  state.words = Array.isArray(p.words) ? p.words.filter((w) => Array.isArray(w) && w.length === 3 && w.every((v, i) => (i < 2 ? Number.isFinite(v) : typeof v === "string"))) : [];
   renderSpeakerBar();
   refreshDesignPanel();
   $("inpTitle").value = state.settings.title;
@@ -823,8 +863,7 @@ function applyProject(p, { keepHistory = false } = {}) {
   $("selSet").value = state.settings.designSet || "standard";
   $("setNote").textContent = DESIGN_SETS[$("selSet").value]?.note || "";
   $("selLayout").value = state.settings.layout;
-  $("inpGap").value = state.settings.gap;
-  $("gapVal").textContent = `${Number(state.settings.gap).toFixed(2)}秒`;
+  syncCutUi();
   renderer.restyle();
   delete $("selMode").dataset.touched;
   applyFormat();
@@ -887,13 +926,27 @@ $("selAspect").onchange = async (e) => {
 };
 $("selLayout").onchange = (e) => { state.settings.layout = e.target.value; refresh(false); };
 $("inpTitle").oninput = (e) => { state.settings.title = e.target.value; scheduleRefresh(); };
-$("inpGap").oninput = (e) => {
-  state.settings.gap = Number(e.target.value);
-  $("gapVal").textContent = `${state.settings.gap.toFixed(2)}秒`;
+// 自動カットの設定を画面に反映
+function syncCutUi() {
+  const s = state.settings;
+  if (!CUT_PRESETS[s.cutPreset]) s.cutPreset = "solo";
+  if (!Number.isFinite(Number(s.minSilence))) s.minSilence = CUT_PRESETS[s.cutPreset].minimum;
+  $("selCutPreset").value = s.cutPreset;
+  $("inpGap").value = s.minSilence;
+  $("gapVal").textContent = `${Number(s.minSilence).toFixed(2)}秒`;
+}
+const cutChanged = () => {
+  syncCutUi();
   computeSpeech();
   recordEdit();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => refresh(true), 200);
+};
+$("inpGap").oninput = (e) => { state.settings.minSilence = Number(e.target.value); cutChanged(); };
+$("selCutPreset").onchange = (e) => {
+  state.settings.cutPreset = e.target.value;
+  state.settings.minSilence = CUT_PRESETS[e.target.value].minimum; // 種類を変えたら長さもその種類の標準に
+  cutChanged();
 };
 $("btnAddLine").onclick = async () => {
   const s = outToSrc(state.segs, state.t).src;

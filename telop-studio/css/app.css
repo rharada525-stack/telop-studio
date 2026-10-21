@@ -86,6 +86,7 @@ th { position: sticky; top: 0; background: #262a32; font-size: 11px; color: var(
 td { border-top: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
 td.time { width: 64px; }
 td.time button { background: none; border: 0; color: var(--accent2); cursor: pointer; padding: 2px 0; }
+td.time button.retake-hint { display: block; margin-top: 4px; padding: 1px 5px; border: 1px solid #e0a030; border-radius: 4px; color: #e0a030; font-size: 11px; white-space: nowrap; }
 td textarea { width: 100%; min-width: 180px; resize: vertical; min-height: 52px; line-height: 1.4; }
 td select { width: 150px; }
 td input[type=text] { width: 100%; min-width: 120px; }
