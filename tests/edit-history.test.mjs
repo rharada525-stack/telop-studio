@@ -58,6 +58,7 @@ test('履歴はコピーを保持し、上限を超えた古いものを破棄�
 
 test('全字幕の初期化は文章・時間・話者・追加した行と字幕以外の設定を残し、1操作で戻せる', () => {
   const before = {
+    words: [[1, 2, '直した'], [2, 3, '文章']],
     lines: [
       { id: 'a', src: [1, 3], text: '直した{文章}', speaker: 'A', cut: true, fx: 'hook', fxText: '別の演出', fxPos: 'tr', screen: 'zoom' },
       { id: 'added', src: [4, 5], text: '追加した字幕', speaker: 'B', fx: 'point', screen: 'dark' },
@@ -71,6 +72,7 @@ test('全字幕の初期化は文章・時間・話者・追加した行と字�
   const design = { family: 'default', strokes: [] };
   const reset = resetSubtitles(before, design);
   assert.deepEqual(reset.lines.map(l => [l.id, l.text, l.src, l.speaker]), before.lines.map(l => [l.id, l.text, l.src, l.speaker]));
+  assert.deepEqual(reset.words, before.words);
   assert.ok(reset.lines.every(l => !l.cut && !l.fx && !l.fxText && l.fxPos === 'auto' && l.screen === 'auto'));
   assert.deepEqual(reset.settings.speakers.map(s => s.design), [design, design]);
   assert.equal(reset.settings.designSet, 'standard');

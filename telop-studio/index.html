@@ -47,6 +47,7 @@
           <label>プロジェクトを選ぶ<select id="selSave"></select></label>
           <button id="btnOpenSave" class="ghost" type="button">続きから開く</button>
         </div>
+        <button id="btnDeleteSave" class="ghost project-delete" type="button">選択したプロジェクトを削除</button>
         <label class="save-name">プロジェクト名<input id="inpSaveName" type="text" maxlength="60"></label>
         <div class="save-actions">
           <button id="btnNewSave" class="ghost" type="button">新しく始める</button>
@@ -215,6 +216,16 @@
     </div>
   </section>
 </main>
+<dialog id="deleteProjectDialog" class="project-dialog" aria-labelledby="deleteProjectTitle" aria-describedby="deleteProjectDescription">
+  <h2 id="deleteProjectTitle">プロジェクトを削除しますか？</h2>
+  <p class="project-dialog-name" id="deleteProjectName"></p>
+  <p id="deleteProjectDescription">このプロジェクトの編集内容は元に戻せません。必要な場合は、先に開いて「JSONに保存」でバックアップしてください。ほかのプロジェクトと元の動画は残ります。</p>
+  <p id="deleteLastProject" hidden>最後のプロジェクトを削除した後は、新しい空のプロジェクトを作ります。</p>
+  <form method="dialog" class="project-dialog-actions">
+    <button class="ghost" value="cancel" autofocus>キャンセル</button>
+    <button class="primary" value="delete">削除する</button>
+  </form>
+</dialog>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>

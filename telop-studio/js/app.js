@@ -58,9 +58,9 @@ let editGroupId = 0;
 
 function editSnapshot() {
   const p = projectData();
-  return { settings: p.settings, lines: p.lines, autoEdit: p.autoEdit };
+  return { settings: p.settings, lines: p.lines, words: p.words, autoEdit: p.autoEdit };
 }
-function editorLocked() { return analysisRunning || projectTransition || historyApplying || document.body.classList.contains("busy"); }
+function editorLocked() { return analysisRunning || projectTransition || historyApplying || $("deleteProjectDialog").open || document.body.classList.contains("busy"); }
 function syncEditControls() {
   const locked = editorLocked() || !state.clips.length;
   $("btnUndoEdit").disabled = locked || !editHistory.canUndo;
@@ -802,7 +802,7 @@ function save() {
 
 function updateSaveLocks() {
   const locked = editorLocked();
-  for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave"]) $(id).disabled = locked || !activeSaveId;
+  for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave", "btnDeleteSave"]) $(id).disabled = locked || !activeSaveId;
   $("inpProject").disabled = locked;
   $("btnDeleteModels").disabled = locked || deletingModels || !("caches" in window);
   syncEditControls();
@@ -1105,6 +1105,54 @@ $("btnNewSave").onclick = () => changeSave(() => projectStore.create(activeSaveK
   version: 2, files: projectData().files, settings: defaultSettings(), lines: [],
 }));
 $("btnCopySave").onclick = () => changeSave(() => projectStore.create(activeSaveKey, projectData()));
+$("btnDeleteSave").onclick = async () => {
+  if (editorLocked() || !activeSaveId) return;
+  let target;
+  try {
+    const group = projectStore.read(activeSaveKey);
+    target = group?.entries.find(e => e.id === $("selSave").value);
+    if (!target) throw new Error("削除するプロジェクトを選んでください。");
+    $("deleteProjectName").textContent = target.name;
+    $("deleteLastProject").hidden = group.entries.length !== 1;
+    const dialog = $("deleteProjectDialog");
+    dialog.returnValue = "cancel";
+    const confirmed = await new Promise(resolve => {
+      dialog.addEventListener("close", () => resolve(dialog.returnValue === "delete"), { once: true });
+      dialog.showModal();
+      updateSaveLocks();
+    });
+    updateSaveLocks();
+    if (!confirmed) return;
+  } catch (e) {
+    updateSaveLocks();
+    setStatus("projectStatus", `削除できません：${e.message}`, true);
+    return;
+  }
+  projectTransition = true;
+  updateSaveLocks();
+  try {
+    await settle();
+    if (!save()) return;
+    const { removed, active } = projectStore.remove(activeSaveKey, target.id, {
+      version: 2, files: projectData().files, settings: defaultSettings(), lines: [],
+    });
+    if (active.id !== activeSaveId) {
+      stop();
+      activeSaveId = active.id;
+      state.t = 0;
+      applyProject(active.project);
+      await refresh(true);
+      setStatus("anaStatus", active.project.lines.length ? `「${active.name}」を開きました。` : `「${active.name}」を開きました。「解析する」で文字起こしを始められます。`);
+    }
+    renderSaveControls();
+    setStatus("projectStatus", `「${removed.name}」を削除しました。編集中：${active.name}`);
+  } catch (e) {
+    setStatus("projectStatus", `削除できません：${e.message}`, true);
+  } finally {
+    projectTransition = false;
+    updateSaveLocks();
+  }
+};
 $("inpSaveName").onchange = () => {
   if (analysisRunning || projectTransition || !activeSaveId) return;
   try {
@@ -1167,7 +1215,7 @@ $("btnDeleteModels").onclick = async () => {
   }
 };
 document.addEventListener("keydown", (e) => {
-  if (document.body.classList.contains("busy")) return;
+  if (document.body.classList.contains("busy") || $("deleteProjectDialog").open) return;
   const el = document.activeElement;
   const typing = el?.isContentEditable || el?.tagName === "TEXTAREA" ||
     (el?.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit"].includes(el.type));
