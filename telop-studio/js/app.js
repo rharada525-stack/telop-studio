@@ -58,7 +58,7 @@ function editSnapshot() {
   const p = projectData();
   return { settings: p.settings, lines: p.lines, autoEdit: p.autoEdit };
 }
-function editorLocked() { return analysisRunning || projectTransition || historyApplying || document.body.classList.contains("busy"); }
+function editorLocked() { return analysisRunning || projectTransition || historyApplying || $("deleteProjectDialog").open || document.body.classList.contains("busy"); }
 function syncEditControls() {
   const locked = editorLocked() || !state.clips.length;
   $("btnUndoEdit").disabled = locked || !editHistory.canUndo;
@@ -1059,9 +1059,19 @@ $("btnDeleteSave").onclick = async () => {
     const group = projectStore.read(activeSaveKey);
     target = group?.entries.find(e => e.id === $("selSave").value);
     if (!target) throw new Error("削除するプロジェクトを選んでください。");
-    const last = group.entries.length === 1 ? "\n最後のプロジェクトを削除した後は、新しい空のプロジェクトを作ります。" : "";
-    if (!confirm(`「${target.name}」を削除します。\nこのプロジェクトの編集内容は元に戻せません。必要な場合は、先に開いて「JSONに保存」でバックアップしてください。\nほかのプロジェクトと元の動画は残ります。${last}\n削除しますか？`)) return;
+    $("deleteProjectName").textContent = target.name;
+    $("deleteLastProject").hidden = group.entries.length !== 1;
+    const dialog = $("deleteProjectDialog");
+    dialog.returnValue = "cancel";
+    const confirmed = await new Promise(resolve => {
+      dialog.addEventListener("close", () => resolve(dialog.returnValue === "delete"), { once: true });
+      dialog.showModal();
+      updateSaveLocks();
+    });
+    updateSaveLocks();
+    if (!confirmed) return;
   } catch (e) {
+    updateSaveLocks();
     setStatus("projectStatus", `削除できません：${e.message}`, true);
     return;
   }
@@ -1148,7 +1158,7 @@ $("btnDeleteModels").onclick = async () => {
   }
 };
 document.addEventListener("keydown", (e) => {
-  if (document.body.classList.contains("busy")) return;
+  if (document.body.classList.contains("busy") || $("deleteProjectDialog").open) return;
   const el = document.activeElement;
   const typing = el?.isContentEditable || el?.tagName === "TEXTAREA" ||
     (el?.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit"].includes(el.type));
