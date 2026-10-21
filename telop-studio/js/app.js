@@ -12,6 +12,7 @@ import { buildPremierePackage } from "./premiere.js";
 import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js";
 import { createProjectStore, validateProject, projectFiles, sameFiles } from "./project-store.js";
 import { modelCacheEntries, deleteModelCache } from "./model-cache.js";
+import { createEditHistory, resetSubtitles } from "./edit-history.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -48,6 +49,56 @@ const projectStore = createProjectStore({
   setItem: (key, value) => localStorage.setItem(key, value),
 });
 let activeSaveId = null, activeSaveKey = null, analysisRunning = false, projectTransition = false, deletingModels = false;
+const editHistory = createEditHistory(50);
+let historyApplying = false;
+const editGroups = new WeakMap();
+let editGroupId = 0;
+
+function editSnapshot() {
+  const p = projectData();
+  return { settings: p.settings, lines: p.lines, autoEdit: p.autoEdit };
+}
+function editorLocked() { return analysisRunning || projectTransition || historyApplying || document.body.classList.contains("busy"); }
+function syncEditControls() {
+  const locked = editorLocked() || !state.clips.length;
+  $("btnUndoEdit").disabled = locked || !editHistory.canUndo;
+  $("btnRedoEdit").disabled = locked || !editHistory.canRedo;
+  $("btnResetSubtitles").disabled = locked || !state.lines.length;
+  $("btnAuto").disabled = locked || !state.lines.length;
+  $("btnAddLine").disabled = locked || !state.segs.length;
+}
+function recordEdit() {
+  if (!activeSaveId || !state.clips.length || historyApplying || analysisRunning) return;
+  const el = document.activeElement;
+  let group = null;
+  if (el?.matches('textarea, input[type="text"], input[type="number"], input[type="range"], input[type="color"]')) {
+    if (!editGroups.has(el)) editGroups.set(el, ++editGroupId);
+    group = editGroups.get(el);
+  }
+  editHistory.commit(editSnapshot(), group);
+  syncEditControls();
+}
+document.addEventListener("focusout", () => editHistory.endGroup());
+document.addEventListener("pointerup", () => editHistory.endGroup());
+
+async function historyAction(action, status) {
+  if (editorLocked() || !state.clips.length) return;
+  recordEdit();
+  historyApplying = true;
+  updateSaveLocks();
+  try {
+    stop();
+    await settle();
+    const snapshot = action();
+    if (!snapshot) return;
+    applyProject(snapshot, { keepHistory: true });
+    await refresh(true);
+    setStatus("editStatus", status);
+  } finally {
+    historyApplying = false;
+    updateSaveLocks();
+  }
+}
 
 function loadDefaultDesign() {
   try { return normalizeDesign(JSON.parse(localStorage.getItem(DESIGN_KEY))); } catch { return structuredClone(DEFAULT_DESIGN); }
@@ -145,6 +196,7 @@ async function init() {
 // 字幕デザインが変わったら作り直して再描画（連続入力はまとめる）
 let designTimer;
 function designChanged() {
+  recordEdit();
   clearTimeout(designTimer);
   designTimer = setTimeout(async () => {
     designTimer = null;
@@ -182,7 +234,7 @@ function applyFormat() {
 
 // ---------------------------------------------------------------- step 1: clips
 async function addFiles(files) {
-  if (analysisRunning || projectTransition || document.body.classList.contains("busy")) return;
+  if (editorLocked()) return;
   files = [...files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$/i.test(f.name));
   if (!files.length) return;
   if (state.lines.length && !confirm("素材を追加すると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
@@ -234,6 +286,8 @@ async function clipsChanged(fromAdd) {
     Object.assign(state, { db: null, pcm: null, speech: [], lines: [], segs: [], items: [] });
     await renderer.setItems([]);
     renderTable();
+    editHistory.reset(editSnapshot());
+    syncEditControls();
     applyFormat();
     for (const id of ["btnPlay", "seek", "btnExport", "btnSrt", "btnSaveProject", "btnAddLine"]) $(id).disabled = true;
     $("cutSummary").textContent = "";
@@ -251,8 +305,8 @@ async function clipsChanged(fromAdd) {
   }
   state.lines = [];
   state.t = 0;
-  $("btnUndoAuto").hidden = true; // 素材が変わったら、おまかせ編集の「元に戻す」は使えない
-  beforeAuto = null;
+  editHistory.reset(editSnapshot());
+  syncEditControls();
   try {
     const key = projectKey();
     const group = projectStore.open(key, projectData());
@@ -299,7 +353,7 @@ function renderClipList() {
     up.disabled = i === 0;
     down.disabled = i === state.clips.length - 1;
     const move = async (j) => {
-      if (analysisRunning || projectTransition || document.body.classList.contains("busy")) return;
+      if (editorLocked()) return;
       if (state.lines.length && !confirm("並び順を変えると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
       await settle(); if (!save()) return;
       stop();
@@ -310,7 +364,7 @@ function renderClipList() {
     up.onclick = () => move(i - 1);
     down.onclick = () => move(i + 1);
     del.onclick = async () => {
-      if (analysisRunning || projectTransition || document.body.classList.contains("busy")) return;
+      if (editorLocked()) return;
       if (state.lines.length && !confirm("素材を外すと、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
       await settle(); if (!save()) return;
       stop();
@@ -337,7 +391,7 @@ function applySpeakers(segments) {
 }
 
 function analyze(onlySpeakers = false) {
-  if (!state.pcm || analysisRunning || projectTransition || deletingModels) return;
+  if (!state.pcm || editorLocked() || deletingModels) return;
   analysisRunning = true;
   updateSaveLocks();
   $("btnAnalyze").disabled = $("btnDiarize").disabled = true;
@@ -403,6 +457,7 @@ function analyze(onlySpeakers = false) {
 // ---------------------------------------------------------------- model → view
 let refreshTimer;
 function scheduleRefresh() {
+  recordEdit();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => refresh(false), 250);
 }
@@ -410,6 +465,7 @@ function scheduleRefresh() {
 // 作り直しは順番に1つずつ（途中で書き出しが始まって、古いテロップと新しいテロップが混ざらないように）
 let refreshChain = Promise.resolve();
 function refresh(rebuildTable) {
+  recordEdit();
   refreshChain = refreshChain.then(() => doRefresh(rebuildTable)).catch((e) => console.error(e));
   return refreshChain;
 }
@@ -437,6 +493,7 @@ async function doRefresh(rebuildTable) {
   $("btnDiarize").disabled = !state.lines.length;
   $("btnAuto").disabled = !state.lines.length;
   $("btnPremiere").disabled = !state.segs.length;
+  syncEditControls();
   save();
   if (!state.playing) await seekTo(state.t);
 }
@@ -693,6 +750,7 @@ function projectData() {
 }
 function save() {
   if (!state.clips.length || !activeSaveId || activeSaveKey !== projectKey()) return false;
+  recordEdit();
   try {
     const entry = projectStore.save(activeSaveKey, activeSaveId, projectData());
     setStatus("projectStatus", `自動保存済み：${entry.name}`);
@@ -704,10 +762,11 @@ function save() {
 }
 
 function updateSaveLocks() {
-  const locked = analysisRunning || projectTransition || document.body.classList.contains("busy");
+  const locked = editorLocked();
   for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave"]) $(id).disabled = locked || !activeSaveId;
   $("inpProject").disabled = locked;
   $("btnDeleteModels").disabled = locked || deletingModels || !("caches" in window);
+  syncEditControls();
 }
 
 function renderSaveControls() {
@@ -722,7 +781,7 @@ function renderSaveControls() {
 }
 
 async function changeSave(action) {
-  if (analysisRunning || projectTransition || !activeSaveId || document.body.classList.contains("busy")) return;
+  if (editorLocked() || !activeSaveId) return;
   projectTransition = true;
   updateSaveLocks();
   try {
@@ -731,8 +790,6 @@ async function changeSave(action) {
     if (!save()) return; // 保存に失敗した編集を置き去りにしない。
     const entry = action();
     activeSaveId = entry.id;
-    beforeAuto = null;
-    $("btnUndoAuto").hidden = true;
     state.t = 0;
     applyProject(entry.project);
     renderSaveControls();
@@ -745,7 +802,8 @@ async function changeSave(action) {
     updateSaveLocks();
   }
 }
-function applyProject(p) {
+function applyProject(p, { keepHistory = false } = {}) {
+  $("autoStatus").textContent = "";
   const { design: oldDesign, ...s } = p.settings || {};
   // 話者ごとのデザイン。古い保存データ（デザイン1つだけ）は話者Aのデザインとして読み込む
   const sps = (s.speakers && s.speakers.length ? s.speakers : [{ id: "A", name: "話者A", design: oldDesign || speakers()[0].design }])
@@ -777,6 +835,11 @@ function applyProject(p) {
   $("selStrength").value = ["low", "mid", "high"].includes(p.autoEdit?.strength) ? p.autoEdit.strength : "mid";
   syncAudioUi();
   computeSpeech();
+  if (!keepHistory) {
+    editHistory.reset(editSnapshot());
+    $("editStatus").textContent = "";
+  }
+  syncEditControls();
 }
 
 function syncAudioUi() {
@@ -828,6 +891,7 @@ $("inpGap").oninput = (e) => {
   state.settings.gap = Number(e.target.value);
   $("gapVal").textContent = `${state.settings.gap.toFixed(2)}秒`;
   computeSpeech();
+  recordEdit();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => refresh(true), 200);
 };
@@ -871,17 +935,26 @@ $("btnPremiere").onclick = async () => {
   }
 };
 
-// おまかせ編集（押す前の状態を覚えておき、「元に戻す」で戻せる）
-let beforeAuto = null;
+// おまかせ編集も、ほかの編集と同じ履歴で取り消せる。
 $("btnAuto").onclick = async () => {
+  if (editorLocked()) return;
+  recordEdit();
+  historyApplying = true;
+  updateSaveLocks();
   stop();
-  beforeAuto = structuredClone(state.lines);
-  const n = autoEdit(state.lines, { mode: $("selMode").value, strength: $("selStrength").value, speakers: speakers() });
-  await refresh(true);
-  setStatus("autoStatus", `付けた演出：${describe(n)}。気に入らない行は表で直すか、「元に戻す」で戻せます。`);
-  $("btnUndoAuto").hidden = false;
+  try {
+    await settle();
+    const n = autoEdit(state.lines, { mode: $("selMode").value, strength: $("selStrength").value, speakers: speakers() });
+    editHistory.commit(editSnapshot());
+    await refresh(true);
+    setStatus("autoStatus", `付けた演出：${describe(n)}。気に入らない行は表で直すか、「元に戻す」で戻せます。`);
+  } finally {
+    historyApplying = false;
+    updateSaveLocks();
+  }
 };
-$("selMode").onchange = (e) => { e.target.dataset.touched = "1"; };
+$("selMode").onchange = (e) => { e.target.dataset.touched = "1"; save(); };
+$("selStrength").onchange = () => save();
 
 // デザインセット：字幕のデザイン（全話者）と、演出の見た目をまとめて切り替える
 $("selSet").onchange = (e) => {
@@ -907,14 +980,13 @@ $("selSet").onchange = (e) => {
 };
 $("setNote").textContent = DESIGN_SETS.standard.note;
 $("chkHighlight").onchange = (e) => { state.settings.autoHighlight = e.target.checked; refresh(false); };
-$("btnUndoAuto").onclick = async () => {
-  if (!beforeAuto) return;
-  state.lines = beforeAuto;
-  beforeAuto = null;
-  $("btnUndoAuto").hidden = true;
-  await refresh(true);
-  setStatus("autoStatus", "おまかせ編集の前に戻しました。");
-};
+$("btnUndoEdit").onclick = () => historyAction(() => editHistory.undo(), "1つ前の編集に戻しました。");
+$("btnRedoEdit").onclick = () => historyAction(() => editHistory.redo(), "取り消した編集をやり直しました。");
+$("btnResetSubtitles").onclick = () => historyAction(() => {
+  const snapshot = resetSubtitles(editSnapshot(), DEFAULT_DESIGN);
+  editHistory.commit(snapshot);
+  return snapshot;
+}, "字幕のデザイン・演出・画面効果・カット指定を初期化しました。文章は残っています。元に戻すこともできます。");
 
 // 字幕デザイン：保存・読み込み・標準にする・初期に戻す
 // 1人分のファイル = デザインそのもの / 全員分のファイル = { speakers: [{ name, design }] }
@@ -1039,6 +1111,18 @@ $("btnDeleteModels").onclick = async () => {
 };
 document.addEventListener("keydown", (e) => {
   if (document.body.classList.contains("busy")) return;
+  const el = document.activeElement;
+  const typing = el?.isContentEditable || el?.tagName === "TEXTAREA" ||
+    (el?.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit"].includes(el.type));
+  if (!typing && !e.isComposing && !e.altKey && (e.ctrlKey || e.metaKey)) {
+    const key = e.key.toLowerCase();
+    if (key === "z" || key === "y") {
+      e.preventDefault();
+      const redo = key === "y" || e.shiftKey;
+      historyAction(() => redo ? editHistory.redo() : editHistory.undo(), redo ? "取り消した編集をやり直しました。" : "1つ前の編集に戻しました。");
+      return;
+    }
+  }
   if (e.code === "Space" && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName) && state.segs.length) {
     e.preventDefault();
     state.playing ? stop() : play();

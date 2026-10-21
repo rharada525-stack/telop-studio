@@ -118,6 +118,13 @@
 
     <div class="card grow" id="step3">
       <h2><span class="num">3</span>テロップを直す</h2>
+      <div class="edit-toolbar" aria-label="編集の取り消しと初期化">
+        <button id="btnUndoEdit" class="ghost" type="button" title="元に戻す（Ctrl+Z / ⌘Z）" disabled>↶ 元に戻す</button>
+        <button id="btnRedoEdit" class="ghost" type="button" title="やり直す（Ctrl+Shift+Z / Ctrl+Y / ⌘⇧Z）" disabled>↷ やり直す</button>
+        <button id="btnResetSubtitles" class="ghost" type="button" disabled>字幕をすべて初期化</button>
+      </div>
+      <p class="hint">初期化は文章・時間・話者を残し、全員のデザイン・演出・画面効果・カット指定を元に戻します。初期化も取り消せます。</p>
+      <p class="status edit-status" id="editStatus" role="status"></p>
       <div class="auto-bar">
         <button id="btnAuto" class="auto-btn" type="button" disabled>✨ おまかせ編集</button>
         <label>向き
@@ -133,7 +140,6 @@
             <option value="high">派手</option>
           </select>
         </label>
-        <button id="btnUndoAuto" class="ghost small" type="button" hidden>元に戻す</button>
         <label class="hl-switch"><input id="chkHighlight" type="checkbox" checked> 字幕の大事な言葉を自動で強調色にする（数字・「実は」「一番」など）</label>
         <p class="status" id="autoStatus">字幕の言葉から、見出し・ツッコミ・ズーム・強調色などを自動で付けます。手で設定した行はそのままです。</p>
       </div>

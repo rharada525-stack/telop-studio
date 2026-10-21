@@ -102,6 +102,10 @@ tr.is-cut textarea { text-decoration: line-through; }
 #btnPremiere { background: linear-gradient(90deg, #6a3dd6, #9a5bff); }
 
 /* おまかせ編集 */
+.edit-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.edit-toolbar button { font-size: 12px; white-space: normal; }
+.edit-status { margin-bottom: 10px; }
+.edit-status:empty { display: none; }
 .auto-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
   border-radius: 10px; background: linear-gradient(90deg, #3a2030, #2a2440); border: 1px solid #5a3550; }
 .auto-btn { border: 0; border-radius: 99px; padding: 10px 22px; font-weight: 900; font-size: 15px; color: #fff; cursor: pointer;
