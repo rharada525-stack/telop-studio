@@ -119,6 +119,19 @@ tr.is-cut textarea { text-decoration: line-through; }
 .design-set-field, .source-settings .title-field { grid-column: 1 / -1; }
 .set-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 
+.save-manager { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+.save-manager h3 { margin: 0 0 6px; font-size: 13px; }
+.save-manager select, .save-name input { width: 100%; min-width: 0; }
+.save-manager .row label { min-width: 0; }
+.save-name { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin: 12px 0; }
+.save-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.save-actions button { white-space: normal; text-align: left; }
+.save-note { margin: 8px 0 0; }
+.model-storage { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.model-storage summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.model-storage[open] summary { margin-bottom: 8px; }
+.model-storage button { white-space: normal; }
+
 /* 話者 */
 .speaker-opt { margin-top: 10px; align-items: center; }
 .speaker-opt label.check { flex: 1; flex-direction: row; align-items: center; color: var(--text); font-size: 13px; }
