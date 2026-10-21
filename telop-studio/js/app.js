@@ -15,7 +15,7 @@ import { createProjectStore, validateProject, projectFiles, sameFiles } from "./
 import { modelCacheEntries, deleteModelCache, deleteOldModels } from "./model-cache.js";
 import { createEditHistory, resetSubtitles } from "./edit-history.js";
 import { clearRangeEdits, linesForOutput } from "./range-edits.js";
-import { createCutEditor } from "./cut-editor.js?v=20261022-cuts2";
+import { createCutEditor } from "./cut-editor.js?v=20261022-timeline2";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -524,7 +524,7 @@ async function doRefresh(rebuildTable) {
   $("btnDiarize").disabled = !state.lines.length;
   $("btnAuto").disabled = !state.lines.length;
   $("btnPremiere").disabled = !state.segs.length;
-  $("rangeSummary").textContent = state.rangeEdits.length ? '区間の手動調整あり。「区間を指定してカット・戻す」で確認できます。' : 'カット前の動画を見ながら、切る範囲や戻す範囲を調整できます。';
+  $("rangeSummary").textContent = state.rangeEdits.length ? '区間の手動調整あり。「タイムラインでカットを編集」で確認できます。' : 'タイムラインで範囲を選び、削除前に再生して確認できます。';
   cutEditor.refresh();
   syncEditControls();
   save();
@@ -951,6 +951,8 @@ $("btnPlay").onclick = () => (state.playing ? stop() : play());
 $("seek").oninput = (e) => seekTo(Number(e.target.value));
 const cutEditor = createCutEditor({
   clips: () => state.clips, segments: () => state.segs, edits: () => state.rangeEdits,
+  lines: () => state.lines,
+  previewSegments: edits => buildSegments(state.speech,state.lines,edits,state.clips),
   currentSource: () => state.segs.length ? outToSrc(state.segs,state.t).src : 0,
   history: () => editHistory,
   undo: () => historyAction(() => editHistory.undo(),'1つ前の編集に戻しました。'),
