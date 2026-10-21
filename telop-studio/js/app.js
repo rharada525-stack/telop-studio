@@ -763,7 +763,7 @@ function save() {
 
 function updateSaveLocks() {
   const locked = editorLocked();
-  for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave"]) $(id).disabled = locked || !activeSaveId;
+  for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave", "btnDeleteSave"]) $(id).disabled = locked || !activeSaveId;
   $("inpProject").disabled = locked;
   $("btnDeleteModels").disabled = locked || deletingModels || !("caches" in window);
   syncEditControls();
@@ -1052,6 +1052,44 @@ $("btnNewSave").onclick = () => changeSave(() => projectStore.create(activeSaveK
   version: 2, files: projectData().files, settings: defaultSettings(), lines: [],
 }));
 $("btnCopySave").onclick = () => changeSave(() => projectStore.create(activeSaveKey, projectData()));
+$("btnDeleteSave").onclick = async () => {
+  if (editorLocked() || !activeSaveId) return;
+  let target;
+  try {
+    const group = projectStore.read(activeSaveKey);
+    target = group?.entries.find(e => e.id === $("selSave").value);
+    if (!target) throw new Error("削除するプロジェクトを選んでください。");
+    const last = group.entries.length === 1 ? "\n最後のプロジェクトを削除した後は、新しい空のプロジェクトを作ります。" : "";
+    if (!confirm(`「${target.name}」を削除します。\nこのプロジェクトの編集内容は元に戻せません。必要な場合は、先に開いて「JSONに保存」でバックアップしてください。\nほかのプロジェクトと元の動画は残ります。${last}\n削除しますか？`)) return;
+  } catch (e) {
+    setStatus("projectStatus", `削除できません：${e.message}`, true);
+    return;
+  }
+  projectTransition = true;
+  updateSaveLocks();
+  try {
+    await settle();
+    if (!save()) return;
+    const { removed, active } = projectStore.remove(activeSaveKey, target.id, {
+      version: 2, files: projectData().files, settings: defaultSettings(), lines: [],
+    });
+    if (active.id !== activeSaveId) {
+      stop();
+      activeSaveId = active.id;
+      state.t = 0;
+      applyProject(active.project);
+      await refresh(true);
+      setStatus("anaStatus", active.project.lines.length ? `「${active.name}」を開きました。` : `「${active.name}」を開きました。「解析する」で文字起こしを始められます。`);
+    }
+    renderSaveControls();
+    setStatus("projectStatus", `「${removed.name}」を削除しました。編集中：${active.name}`);
+  } catch (e) {
+    setStatus("projectStatus", `削除できません：${e.message}`, true);
+  } finally {
+    projectTransition = false;
+    updateSaveLocks();
+  }
+};
 $("inpSaveName").onchange = () => {
   if (analysisRunning || projectTransition || !activeSaveId) return;
   try {

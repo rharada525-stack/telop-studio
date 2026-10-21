@@ -127,6 +127,7 @@ tr.is-cut textarea { text-decoration: line-through; }
 .save-manager h3 { margin: 0 0 6px; font-size: 13px; }
 .save-manager select, .save-name input { width: 100%; min-width: 0; }
 .save-manager .row label { min-width: 0; }
+.save-manager .project-delete { margin: 8px 0 12px; color: #ffb3be; white-space: normal; }
 .save-name { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin: 12px 0; }
 .save-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .save-actions button { white-space: normal; text-align: left; }

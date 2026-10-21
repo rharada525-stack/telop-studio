@@ -82,6 +82,48 @@ test('容量不足で保存に失敗しても、前回の保存と現在の選�
   assert.deepEqual(store.read('video'), before);
 });
 
+test('選択したプロジェクトだけを削除し、編集中以外の削除では現在の編集を維持する', () => {
+  const { store } = fixture();
+  const first = store.open('video', project('元の字幕')).entries[0];
+  const second = store.create('video', project('2番目の字幕'));
+  const third = store.create('video', project('編集中の字幕'));
+  const other = store.open('other-video', project('別動画'));
+  assert.equal(store.remove('video', second.id).active.id, third.id);
+  assert.deepEqual(store.read('video').entries.map(e => e.id), [first.id, third.id]);
+  const result = store.remove('video', third.id);
+  assert.equal(result.removed.project.lines[0].text, '編集中の字幕');
+  assert.equal(result.active.id, first.id);
+  assert.equal(result.active.project.lines[0].text, '元の字幕');
+  assert.deepEqual(store.read('other-video'), other);
+});
+
+test('最後の1件の削除では空のプロジェクトを作り、再読込しても旧保存が復活しない', () => {
+  const { store, storage, values } = fixture();
+  const legacy = JSON.stringify(project('旧自動保存の字幕'));
+  values.set('video', legacy);
+  const first = store.open('video', project('')).entries[0];
+  const { active } = store.remove('video', first.id, project(''));
+  assert.equal(active.name, 'プロジェクト2');
+  assert.notEqual(active.id, first.id);
+  assert.deepEqual(active.project.lines, []);
+  const reopened = createProjectStore(storage).open('video', project('初期値'));
+  assert.deepEqual(reopened.entries, [active]);
+  assert.equal(reopened.activeId, active.id);
+  assert.equal(store.create('video', project('次の編集')).name, 'プロジェクト3');
+  assert.equal(values.get('video'), legacy);
+});
+
+test('削除先不明・保存失敗・最後の1件の置き換え不備では元データを変更しない', () => {
+  const { store, storage } = fixture();
+  const first = store.open('video', project('残す字幕')).entries[0];
+  const before = store.read('video');
+  assert.throws(() => store.remove('video', 'missing', project('')), /見つかりません/);
+  assert.throws(() => store.remove('video', first.id), /形式/);
+  storage.setItem = () => { throw new Error('QuotaExceededError'); };
+  assert.throws(() => store.remove('video', first.id, project('')), /Quota/);
+  assert.deepEqual(store.read('video'), before);
+});
+
 test('破損した保存・JSONを受け入れず、残っているデータを書き換えない', () => {
   const { values, store } = fixture();
   values.set('telop-studio:saves:v1:video', '{broken');

@@ -66,6 +66,16 @@ export function createProjectStore(storage, { id = () => crypto.randomUUID(), no
       write(key, group);
       return entry;
     },
+    remove(key, entryId, initial) {
+      const group = read(key);
+      const index = group?.entries.findIndex(e => e.id === entryId) ?? -1;
+      if (index < 0) throw new Error('プロジェクトが見つかりません。');
+      const [removed] = group.entries.splice(index, 1);
+      if (!group.entries.length) add(group, initial);
+      else if (group.activeId === entryId) group.activeId = group.entries[Math.min(index, group.entries.length - 1)].id;
+      write(key, group); // 失敗したら、削除前の保存と選択が残る。
+      return { removed, active: group.entries.find(e => e.id === group.activeId) };
+    },
     save(key, entryId, project, name) {
       validateProject(project);
       const group = read(key);
