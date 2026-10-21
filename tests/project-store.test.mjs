@@ -17,10 +17,10 @@ test('従来の自動保存を引き継ぎ、旧データを上書きせずに�
   const legacy = JSON.stringify(project('前の編集'));
   values.set('video-key', legacy);
   const group = store.open('video-key', project(''));
-  assert.equal(group.entries[0].name, 'セーブデータ1');
+  assert.equal(group.entries[0].name, 'プロジェクト1');
   assert.equal(group.entries[0].project.lines[0].text, '前の編集');
   const fresh = store.create('video-key', project(''));
-  assert.equal(fresh.name, 'セーブデータ2');
+  assert.equal(fresh.name, 'プロジェクト2');
   assert.deepEqual(fresh.project.lines, []);
   assert.equal(store.select('video-key', group.activeId).project.lines[0].text, '前の編集');
   assert.equal(values.get('video-key'), legacy);
@@ -40,7 +40,28 @@ test('同じ動画の複製・名前変更・再読込・JSON由来の保存が�
   assert.equal(store.select('video', copy.id).project.lines[0].text, '別の字幕');
 });
 
-test('別動画のセーブを分離し、素材の順番・サイズが違うJSONは一致としない', () => {
+test('旧自動名だけをプロジェクト名に変更し、編集内容・選択・独自の名前・保存先を維持する', () => {
+  const { values, store } = fixture();
+  const before = { version: 1, nextNumber: 4, activeId: 'b', entries: [
+    { id: 'a', name: 'セーブデータ1', updatedAt: 'before', project: project('元の字幕') },
+    { id: 'b', name: 'ショート版', updatedAt: 'before', project: project('修正した字幕') },
+    { id: 'c', name: 'セーブデータ3（手動名）', updatedAt: 'before', project: project('別の字幕') },
+  ] };
+  const key = 'telop-studio:saves:v1:video';
+  values.set(key, JSON.stringify(before));
+  const opened = store.open('video', project(''));
+  assert.deepEqual(opened.entries.map(e => e.name), ['プロジェクト1', 'ショート版', 'セーブデータ3（手動名）']);
+  assert.equal(opened.activeId, before.activeId);
+  assert.equal(opened.nextNumber, before.nextNumber);
+  assert.deepEqual(opened.entries.map(({ name, ...e }) => e), before.entries.map(({ name, ...e }) => e));
+  assert.equal(values.get(key), JSON.stringify(before)); // 読み込みだけでは保存を書き換えない。
+  const fresh = store.create('video', project('新しい編集'));
+  assert.equal(fresh.name, 'プロジェクト4');
+  assert.equal(store.select('video', 'b').project.lines[0].text, '修正した字幕');
+  assert.equal(JSON.parse(values.get(key)).entries[0].name, 'プロジェクト1');
+});
+
+test('別動画のプロジェクトを分離し、素材の順番・サイズが違うJSONは一致としない', () => {
   const { store } = fixture();
   store.open('a', project('動画A'));
   store.open('b', project('動画B'));
@@ -69,7 +90,7 @@ test('破損した保存・JSONを受け入れず、残っているデータを�
   assert.throws(() => validateProject({ ...project('字幕'), lines: [{ text: '不正', src: [3, 1] }] }));
 });
 
-test('モデル削除はこのツールのモデルだけを対象とし、他モデル・他キャッシュ・セーブを残す', async () => {
+test('モデル削除はこのツールのモデルだけを対象とし、他モデル・他キャッシュ・プロジェクトを残す', async () => {
   const own = 'https://huggingface.co/onnx-community/whisper-large-v3-turbo/resolve/main/onnx/encoder_model_fp16.onnx';
   const old = 'https://huggingface.co/onnx-community/whisper-small/resolve/main/config.json';
   const foreign = 'https://huggingface.co/other/model/resolve/main/model.onnx';

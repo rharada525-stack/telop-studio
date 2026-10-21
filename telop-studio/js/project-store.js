@@ -1,4 +1,4 @@
-// 動画の組み合わせごとに、独立したセーブデータを保存する。
+// 動画の組み合わせごとに、独立したプロジェクトを保存する。
 // 1回の setItem で更新し、容量不足時には直前の保存をそのまま残す。
 const PREFIX = 'telop-studio:saves:v1:';
 
@@ -25,13 +25,17 @@ export function createProjectStore(storage, { id = () => crypto.randomUUID(), no
       throw new Error('保存済みデータを読み込めません。JSONファイルに保存してから確認してください。');
     }
     group.entries.forEach(e => validateProject(e.project));
+    // 保存先と編集内容はそのままに、以前の自動名だけを新しい呼び名にする。
+    for (const entry of group.entries) {
+      entry.name = entry.name.replace(/^セーブデータ([1-9]\d*)$/, 'プロジェクト$1');
+    }
     return group;
   };
   const write = (key, group) => storage.setItem(PREFIX + key, JSON.stringify(group));
   const add = (group, project) => {
     validateProject(project);
-    while (group.entries.some(e => e.name === `セーブデータ${group.nextNumber}`)) group.nextNumber++;
-    const entry = { id: id(), name: `セーブデータ${group.nextNumber++}`, updatedAt: now(), project: structuredClone(project) };
+    while (group.entries.some(e => e.name === `プロジェクト${group.nextNumber}`)) group.nextNumber++;
+    const entry = { id: id(), name: `プロジェクト${group.nextNumber++}`, updatedAt: now(), project: structuredClone(project) };
     group.entries.push(entry);
     group.activeId = entry.id;
     return entry;
@@ -57,7 +61,7 @@ export function createProjectStore(storage, { id = () => crypto.randomUUID(), no
     select(key, entryId) {
       const group = read(key);
       const entry = group?.entries.find(e => e.id === entryId);
-      if (!entry) throw new Error('セーブデータが見つかりません。');
+      if (!entry) throw new Error('プロジェクトが見つかりません。');
       group.activeId = entry.id;
       write(key, group);
       return entry;
