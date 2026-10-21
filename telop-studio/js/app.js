@@ -794,6 +794,7 @@ async function doExport() {
     locked.forEach((el) => (el.disabled = false));
     document.body.classList.remove("busy");
     $("expProgress").hidden = true;
+    updateSaveLocks();
     seekTo(state.t);
   }
 }
@@ -1032,6 +1033,7 @@ $("btnPremiere").onclick = async () => {
   } finally {
     btn.disabled = false;
     document.body.classList.remove("busy");
+    updateSaveLocks();
     seekTo(state.t);
   }
 };
