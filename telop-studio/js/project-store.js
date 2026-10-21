@@ -9,7 +9,8 @@ export function validateProject(p) {
   if (!p || !Array.isArray(p.lines) || !p.settings || !projectFiles(p).length ||
     projectFiles(p).some(f => typeof f.name !== 'string' || !Number.isFinite(f.size)) ||
     p.lines.some(l => typeof l.text !== 'string' || !Array.isArray(l.src) || l.src.length !== 2 ||
-      !l.src.every(Number.isFinite) || l.src[0] < 0 || l.src[1] < l.src[0])) {
+      !l.src.every(Number.isFinite) || l.src[0] < 0 || l.src[1] < l.src[0]) ||
+    (p.rangeEdits !== undefined && (!Array.isArray(p.rangeEdits) || p.rangeEdits.some(e => !e || !Number.isFinite(e.start) || !Number.isFinite(e.end) || e.start < 0 || e.end <= e.start || typeof e.keep !== 'boolean')))) {
     throw new Error('作業ファイルの形式を確認してください。');
   }
   return p;

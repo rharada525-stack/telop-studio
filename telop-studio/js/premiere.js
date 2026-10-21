@@ -1,6 +1,6 @@
 // Premiere Pro 用の書き出し（FCP7 XML + テロップ画像 + 効果音 + 字幕SRT を ZIP にまとめる）
 import { zipSync, strToU8 } from "https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js";
-import { totalDuration, toSrt } from "./timeline.js";
+import { totalDuration, toSrt } from "./timeline.js?v=20261022-cuts2";
 
 const SEQ_FPS = 30;
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

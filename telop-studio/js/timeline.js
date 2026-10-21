@@ -1,5 +1,6 @@
 // 音声解析（無音検出）・字幕の分割・カット後の時間変換・テロップ一覧の生成
 import { highlight } from "./autoedit.js";
+import { applyRangeEdits } from "./range-edits.js";
 
 // ---------------------------------------------------------------- audio
 export async function decodeAudio(file) {
@@ -464,7 +465,7 @@ export const clipAt = (clips, t) => {
 
 // ---------------------------------------------------------------- cut mapping
 // 残す区間 = しゃべっている区間 − 「カット」にチェックした字幕の区間
-export function buildSegments(speech, lines) {
+export function buildSegments(speech, lines, rangeEdits = [], clips = []) {
   let segs = speech.map((r) => ({ ...r }));
   for (const l of lines.filter((l) => l.cut)) {
     const [a, b] = l.src;
@@ -476,6 +477,7 @@ export function buildSegments(speech, lines) {
     }
     segs = next;
   }
+  if (rangeEdits.length) segs = applyRangeEdits(segs, rangeEdits, clips);
   let o = 0;
   for (const s of segs) { s.out = o; o += s.end - s.start; }
   return segs;

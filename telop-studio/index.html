@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Zen+Maru+Gothic:wght@500;700;900&family=Dela+Gothic+One&family=Kosugi+Maru&family=BIZ+UDPGothic:wght@400;700&family=Noto+Serif+JP:wght@700;900&family=Shippori+Mincho+B1:wght@700;800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css?v=20261022-cuts2">
 </head>
 <body>
 <header class="topbar">
@@ -124,6 +124,8 @@
         <small>これより長い無言だけをカットします。文字起こし後は、言葉を話している所は切りません</small>
       </label>
       <p class="summary" id="cutSummary"></p>
+      <button id="btnCutEditor" class="ghost small" type="button" disabled>区間を指定してカット・戻す</button>
+      <p class="status" id="rangeSummary">カット前の動画を見ながら、切る範囲や戻す範囲を調整できます。</p>
     </div>
 
     <div class="card grow" id="step3">
@@ -216,6 +218,35 @@
     </div>
   </section>
 </main>
+<dialog id="cutEditorDialog" class="project-dialog cut-editor" aria-labelledby="cutEditorTitle">
+  <div class="cut-editor-header"><h2 id="cutEditorTitle">カットする区間を調整</h2><button id="btnCloseCutEditor" class="ghost" type="button">閉じる</button></div>
+  <p class="hint">元の動画の秒数で指定します。区間の調整は自動カット・字幕のカットより優先されます。変更は自動保存され、元に戻せます。</p>
+  <label class="cut-clip-label">素材<select id="selCutClip"></select></label>
+  <div class="cut-editor-grid">
+    <div>
+      <video id="cutSourceVideo" controls playsinline preload="metadata" aria-label="カット前の元動画"></video>
+      <p class="hint">カット前の元動画（字幕なし） <span id="cutSourceTime" class="mono"></span></p>
+      <div class="cut-frame-actions"><button id="btnCutFrameBack" class="ghost small" type="button">1コマ前へ</button><button id="btnCutFrameNext" class="ghost small" type="button">1コマ後へ</button><span class="hint">1コマ＝1/30秒</span></div>
+      <div id="cutMap" class="cut-map" aria-label="緑は残す区間、赤はカットする区間"></div>
+      <p class="hint">緑：残す　赤：カット　枠：指定中の区間</p>
+    </div>
+    <div class="cut-range-controls">
+      <label>開始（秒）<input id="inpCutStart" type="number" min="0" step="0.01" value="0"></label>
+      <input id="sliderCutStart" type="range" min="0" step="0.01" value="0" aria-label="カット開始位置">
+      <button id="btnMarkCutStart" class="ghost small" type="button">今の位置を開始にする</button>
+      <label>終了（秒）<input id="inpCutEnd" type="number" min="0" step="0.01" value="0"></label>
+      <input id="sliderCutEnd" type="range" min="0" step="0.01" value="0" aria-label="カット終了位置">
+      <button id="btnMarkCutEnd" class="ghost small" type="button">今の位置を終了にする</button>
+      <p id="cutSelectionSummary" class="status"></p>
+      <div class="cut-editor-actions"><button id="btnApplyRangeCut" class="primary" type="button">この区間をカット</button><button id="btnKeepRange" class="ghost" type="button">この区間を戻す</button><button id="btnNewRange" class="ghost" type="button">別の区間を指定</button></div>
+    </div>
+  </div>
+  <p id="cutEditorStatus" class="status" role="status"></p>
+  <div class="cut-editor-actions"><button id="btnUndoRange" class="ghost small" type="button">↶ 元に戻す</button><button id="btnRedoRange" class="ghost small" type="button">↷ やり直す</button></div>
+  <h3>この素材でカットする区間</h3>
+  <p class="hint">「調整」で範囲を選び、開始を後ろへ・終了を前へ動かして「カット範囲を変更」を押すと、その分の映像が戻ります。</p>
+  <div id="cutRangeList" class="cut-range-list"></div>
+</dialog>
 <dialog id="deleteProjectDialog" class="project-dialog" aria-labelledby="deleteProjectTitle" aria-describedby="deleteProjectDescription">
   <h2 id="deleteProjectTitle">プロジェクトを削除しますか？</h2>
   <p class="project-dialog-name" id="deleteProjectName"></p>
@@ -227,6 +258,6 @@
   </form>
 </dialog>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/app.js?v=20261022-cuts2"></script>
 </body>
 </html>
