@@ -299,19 +299,28 @@ function screenItems(effect, t, d) {
   }
 }
 
+// 描画とSRTで同じ字幕時刻を使う。演出の有無にかかわらず、カットしていない行を残す。
+function timedLines(lines, segs) {
+  const total = totalDuration(segs);
+  const live = lines.filter((l) => !l.cut).map((l) => ({ l, t0: srcToOut(segs, l.src[0]), t1: srcToOut(segs, l.src[1]) }));
+  return live.map(({ l, t0, t1 }, i) => {
+    const next = live[i + 1];
+    let end = t1;
+    if (next && next.t0 - t1 < 0.6) end = next.t0; // 間が短ければ次の字幕までつなぐ
+    end = Math.min(total, Math.max(end, t0 + 0.5));
+    return { l, t0, end };
+  }).filter(({ t0, end }) => end - t0 > 0.05);
+}
+
 // 字幕行 → 描画用テロップ一覧（出力側の時刻）
 export function buildItems(lines, segs, settings) {
   const total = totalDuration(segs);
   const aspect = settings.aspect || "portrait";
   const speakers = settings.speakers || [];
-  const live = lines.filter((l) => !l.cut).map((l) => ({ l, t0: srcToOut(segs, l.src[0]), t1: srcToOut(segs, l.src[1]) }));
+  const live = timedLines(lines, segs);
   const items = [];
   if (settings.title) items.push({ style: "header", text: settings.title, t: 0.2, d: Math.max(1, total - 0.2) });
-  live.forEach(({ l, t0, t1 }, i) => {
-    const next = live[i + 1];
-    let end = t1;
-    if (next && next.t0 - t1 < 0.6) end = next.t0; // 間が短ければ次の字幕までつなぐ
-    end = Math.max(end, t0 + 0.5);
+  live.forEach(({ l, t0, end }, i) => {
     const fx = FX[l.fx];
     const ownText = (l.fxText || "").trim();
     const replaces = !!(fx && fx.style && !ownText); // 字幕そのものを演出テロップにする
@@ -381,9 +390,8 @@ const ts = (t) => {
   const p = (n, w = 2) => String(n).padStart(w, "0");
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;
 };
-export function toSrt(items) {
-  return items
-    .filter((it) => it.style.startsWith("subtitle"))
-    .map((it, i) => `${i + 1}\n${ts(it.t)} --> ${ts(it.t + it.d)}\n${it.text.replace(/[{}]/g, "")}\n`)
+export function toSrt(lines, segs) {
+  return timedLines(lines, segs)
+    .map(({ l, t0, end }, i) => `${i + 1}\n${ts(t0)} --> ${ts(end)}\n${l.text.replace(/[{}\[\]]/g, "")}\n`)
     .join("\n");
 }

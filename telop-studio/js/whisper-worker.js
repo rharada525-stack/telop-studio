@@ -12,6 +12,10 @@ const progress = (p) => self.postMessage({ type: "progress", p });
 async function transcribe({ audio, model, device }) {
   const key = `${model}|${device}`;
   if (!asr || loadedKey !== key) {
+    // 低スペックモードへ切り替えるとき、高精度モデルをメモリに残さない。
+    if (asr) await asr.dispose();
+    asr = null;
+    loadedKey = "";
     self.postMessage({ type: "status", text: "AIモデルを準備中…（初回のみダウンロード）" });
     // fp16 エンコーダーは GPU によって文字起こしが終わらなくなることがあるため、base/small は fp32 を使う
     const dtype = device === "webgpu"

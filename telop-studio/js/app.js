@@ -309,11 +309,31 @@ function applySpeakers(segments) {
 function analyze(onlySpeakers = false) {
   if (!state.pcm) return;
   $("btnAnalyze").disabled = $("btnDiarize").disabled = true;
+  $("selModel").disabled = true;
+  $("btnCancelAnalyze").hidden = false;
   showProgress("anaProgress", 0);
   worker ||= new Worker("js/whisper-worker.js", { type: "module" });
   const device = "gpu" in navigator ? "webgpu" : "wasm";
   const files = {};
-  const finish = () => { $("btnAnalyze").disabled = false; $("btnDiarize").disabled = !state.lines.length; $("anaProgress").hidden = true; };
+  const finish = () => {
+    $("btnAnalyze").disabled = false;
+    $("btnDiarize").disabled = !state.lines.length;
+    $("selModel").disabled = false;
+    $("btnCancelAnalyze").hidden = true;
+    $("anaProgress").hidden = true;
+  };
+  $("btnCancelAnalyze").onclick = () => {
+    worker.terminate();
+    worker = null;
+    finish();
+    setStatus("anaStatus", "解析を中止しました。重い場合は低スペックモードを選んで、解析し直してください。字幕はそのまま残っています。");
+  };
+  worker.onerror = (e) => {
+    worker.terminate();
+    worker = null;
+    finish();
+    setStatus("anaStatus", `エラー：${e.message}。重い場合は低スペックモードでお試しください。`, true);
+  };
   worker.onmessage = async (e) => {
     const m = e.data;
     if (m.type === "progress" && m.p.status === "progress" && m.p.total) {
@@ -339,7 +359,7 @@ function analyze(onlySpeakers = false) {
       await refresh(true);
     } else if (m.type === "error") {
       finish();
-      setStatus("anaStatus", `エラー：${m.message}`, true);
+      setStatus("anaStatus", `エラー：${m.message}。重い場合は低スペックモードでお試しください。`, true);
     }
   };
   if (onlySpeakers) worker.postMessage({ type: "diarize", audio: state.pcm });
@@ -741,7 +761,7 @@ $("btnPremiere").onclick = async () => {
     setStatus("prStatus", "テロップを画像にしています…");
     const name = baseName() + (state.settings.aspect === "landscape" ? "_16x9" : "");
     const blob = await buildPremierePackage({
-      clips: state.clips, segs: state.segs, renderer, settings: state.settings, items: state.items,
+      clips: state.clips, segs: state.segs, lines: state.lines, renderer, settings: state.settings, items: state.items,
       gains: gains(), sfxEvents: renderer.sfxEvents(), sfxBuffers,
       folder: $("inpFolder").value.trim().replace(/^"|"$/g, ""), name,
       onProgress: (p) => setStatus("prStatus", `書き出し中… ${Math.round(p * 100)}%`),
@@ -855,7 +875,10 @@ const audioChanged = () => { syncAudioUi(); save(); };
 $("chkVoiceAuto").onchange = (e) => { state.settings.audio.voiceAuto = e.target.checked; audioChanged(); };
 $("inpVoice").oninput = (e) => { state.settings.audio.voice = Number(e.target.value); audioChanged(); };
 $("inpSfx").oninput = (e) => { state.settings.audio.sfx = Number(e.target.value); audioChanged(); };
-$("btnSrt").onclick = () => download(new Blob([toSrt(state.items)], { type: "text/plain" }), baseName() + ".srt");
+$("btnSrt").onclick = async () => {
+  await settle();
+  download(new Blob([toSrt(state.lines, state.segs)], { type: "text/plain" }), baseName() + ".srt");
+};
 $("btnSaveProject").onclick = () => download(new Blob([JSON.stringify(projectData(), null, 1)], { type: "application/json" }), baseName() + "_telop.json");
 $("inpProject").onchange = async (e) => {
   const f = e.target.files[0];
