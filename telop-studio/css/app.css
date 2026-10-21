@@ -42,7 +42,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .round { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 16px; cursor: pointer; }
 .round:disabled { opacity: .4; cursor: default; }
 
-.panel { display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; padding-right: 4px; }
+.panel { display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; min-width: 0; padding-right: 4px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .card.grow { flex: 1 0 auto; }
 .card h2 { margin: 0 0 10px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
@@ -112,7 +112,12 @@ tr.is-cut textarea { text-decoration: line-through; }
 .auto-bar .status { flex: 1 1 100%; margin: 0; }
 .auto-bar .hl-switch { flex: 1 1 100%; color: var(--text); font-size: 12px; }
 
-.set-note { color: var(--muted); font-size: 11px; line-height: 1.4; }
+/* 素材の設定：画面設定は同じ行、デザインセットと説明は全幅でまとめる */
+.source-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 14px 12px; align-items: start; }
+.source-settings label, .design-set-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
+.source-settings select, .source-settings input { width: 100%; min-width: 0; }
+.design-set-field, .source-settings .title-field { grid-column: 1 / -1; }
+.set-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 
 /* 話者 */
 .speaker-opt { margin-top: 10px; align-items: center; }
@@ -180,6 +185,6 @@ body.landscape .phone { height: auto; width: 100%; max-width: 900px; aspect-rati
 body.landscape .transport { max-width: 900px; }
 
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; height: auto; }
+  .layout, body.landscape .layout { grid-template-columns: minmax(0, 1fr); height: auto; }
   .phone { height: 70vh; }
 }

@@ -37,6 +37,8 @@ const PROFILES = {
 };
 
 const plain = (t) => t.replace(/[{}\n]/g, "");
+// 見出しの前の「えっと」「えーと、」は判定時だけ除く。字幕の本文は変えない。
+const headingText = (t) => plain(t).trim().replace(/^(?:(?:え[ー〜えっ]*と|あの[ー〜]*|う[ー〜]*んと)[、。,…\s]*)+/, "");
 const untouched = (l) => !l.cut && !l.fx && (!l.screen || l.screen === "auto");
 const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
@@ -77,7 +79,7 @@ export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [
   const spIndex = (l) => Math.max(0, speakers.findIndex((s) => s.id === l.speaker));
 
   // 2) 冒頭のつかみ
-  if (P.hook && L[0] && untouched(L[0]) && plain(L[0].text).length <= 24) {
+  if (P.hook && L[0] && untouched(L[0]) && plain(L[0].text).length <= 24 && !ENUM.test(headingText(L[0].text))) {
     Object.assign(L[0], { fx: "hook", fxText: "", screen: mode === "short" ? "zoom_lines" : "zoom" });
     n.hook++;
     lastFx = lastZoom = 0;
@@ -90,11 +92,12 @@ export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [
     const set = (fx, fxText, screen, key) => { Object.assign(l, { fx, fxText }); if (screen) l.screen = screen; n[key]++; lastFx = i; };
 
     // 3) 見出し「その1／その2」
-    const m = t.match(ENUM);
+    const head = headingText(l.text);
+    const m = head.match(ENUM);
     if (m && m[2] && !l.fx) {
       pointNo = enumNumber(m[2], pointNo + 1);
-      let body = t.slice(m[0].length).replace(/[、。,]$/, "");
-      if (body.length < 3 && next) body = plain(next.text).trim(); // 「まず1つ目」だけなら次の行を本文に
+      let body = head.slice(m[0].length).replace(/[、。,]$/, "");
+      if (!body && next) body = plain(next.text).trim(); // 「まず1つ目」だけなら次の行を本文に
       set("point", `その${pointNo}/${cut(body, 16)}`, null, "point");
       continue;
     }
@@ -102,11 +105,11 @@ export function autoEdit(lines, { mode = "short", strength = "mid", speakers = [
     if (!untouched(l)) continue;
 
     // 3b) 「その1」のあとの「次に〜／最後に〜」
-    const ni = t.match(NEXT_ITEM);
+    const ni = head.match(NEXT_ITEM);
     if (pointNo > 0 && ni) {
-      let body = t.slice(ni[0].length).replace(/[、。,]$/, "");
-      if (body.length < 3 && next) body = plain(next.text).trim();
-      if (body.length >= 2) {
+      let body = head.slice(ni[0].length).replace(/[、。,]$/, "");
+      if (!body && next) body = plain(next.text).trim();
+      if (body.length) {
         pointNo++;
         set("point", `その${pointNo}/${cut(body, 16)}`, null, "point");
         continue;

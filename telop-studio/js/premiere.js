@@ -56,7 +56,7 @@ const levelFilter = (gain) =>
 
 const canvasPng = (c) => new Promise((res) => c.toBlob(async (b) => res(new Uint8Array(await b.arrayBuffer())), "image/png"));
 
-export async function buildPremierePackage({ clips, segs, renderer, settings, items, gains, sfxEvents, sfxBuffers, folder, name, onProgress }) {
+export async function buildPremierePackage({ clips, segs, lines, renderer, settings, items, gains, sfxEvents, sfxBuffers, folder, name, onProgress }) {
   const { W, H } = renderer;
   const total = totalDuration(segs);
   const dir = `${name}_premiere`; // ZIP の中のフォルダ名（素材と同じ場所に展開する）
@@ -208,7 +208,7 @@ export async function buildPremierePackage({ clips, segs, renderer, settings, it
     `</samplecharacteristics></format>${audioTracks.join("")}</audio></media></sequence></xmeml>\n`;
 
   files[`${dir}/${name}.xml`] = strToU8(xml);
-  files[`${dir}/${name}_字幕.srt`] = strToU8(toSrt(items));
+  files[`${dir}/${name}_字幕.srt`] = strToU8(toSrt(lines, segs));
   files[`${dir}/はじめにお読みください.txt`] = strToU8(readme(name, dir, folder, clips));
   onProgress?.(0.95);
   const zip = zipSync(files, { level: 0 }); // 画像も音もすでに圧縮済みなので無圧縮でまとめる
