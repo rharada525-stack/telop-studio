@@ -23,27 +23,41 @@ PowerShellで `./admin/effects-lab/Start-Lab.ps1` を実行し、表示された
 ローカルホスト以外では起動しない補助チェックもありますが、認証の代わりではありません。
 リポジトリ自体の公開範囲は変えません。将来オンラインで管理する場合は、別途認証付きの配置が必要です。
 
-## Premiere用テキストXML（読み込みテスト）
+## Premiere用テキストXML
 
-以前の直接生成 `.prproj` は、ユーザーのPremiereで「プロジェクトが壊れているため開けません」となりました。
-この出力は撤去し、XMLでの読み込み検証に切り替えています。
+ユーザーのPremiereで、PostScript名を指定したFCP 7 Text generatorの読み込み・フォント表示・文字編集を確認済みです（2026-10-22のユーザー報告）。この形式を維持します。直接生成 `.prproj` は開けなかったため撤去済みです。
 
-ページ末尾の「この文字をXMLに保存」で選択中の演出の文章と表示時間を書き出します。
-「文字3個のXMLを保存」は、見本文字を0.5〜3.5秒・4.5〜7.5秒・8.5〜11.5秒に並べます。
-30fpsのFCP 7 XML（xmeml version 5）のText generatorです。字幕の画像・動画、MOGRT、外部素材は含みません。
-白文字・中央配置・太字という共通設定で、文章・改行・表示時間の取り込みを検証します。
-フォントは「XMLのフォント（PostScript名）」で指定できます（初期値は`YuGothic-Bold`）。PCのフォントから選ぶと実際の書体のPostScript名を入力します。フォント本体は同梱しません。
-`Yu Gothic`や`Noto Sans JP`という表示用のファミリー名は、そのまま渡すとこの環境のPremiereで未解決となりました。ファミリー名への自動フォールバックを廃止しています。
-すでにBold/Black等の書体を特定しているため、FCP Text generatorの`fontstyle`はPlain（1）にします。この変更後の取り込み結果は実機確認が必要です。
-**ラボのデザイン（色・フチ・傾き・影・動き・複合パーツ）や通常字幕・背景・効果音は含みません。**
+第一弾は一覧上部の［XML］付き3案です。
 
-Premiereで新規の空プロジェクトを作り、「ファイル → 読み込み」でXMLを取り込みます。
-シーケンスに文字が表示され、文章を書き換えられるか、時間が合うか、保存と再読み込みができるかを確認します。
-読み込みレポートや警告が出た場合は内容も確認してください。
-文字1個のXMLはユーザーのPremiereで読み込めたとの報告があります。文字編集・フォントの一致は未確認です。構文チェックだけで対応済みとは扱いません。
-「強調・白フチ」「ツッコミ・赤」「見出し・イエロー」はブラウザでのデザイン試作として残しています。
-公開版のPremiere ZIP出力は従来のままです。
+- 強調・ポップ: 黄色の文字が跳ね返りながら拡大。
+- ツッコミ・赤スラム: 赤い文字を斜めに叩きつけ、短く揺らす。
+- 見出し・スライド: 水色の文字を左から滑らせる。
+
+文字色・サイズ・傾き・登場・退場・表示中の動きを調整して「この演出をXMLに保存」で保存します。
+「演出3案のXMLを保存」は調整中の内容ではなく、元の3つの見本を0.5〜3.5秒・4.5〜7.5秒・8.5〜11.5秒に並べます。画面の縦横は現在の選択を使います。
+
+30fpsのFCP 7 XML（xmeml version 5）です。文字をText generator、動きをBasic Motion（位置・拡大率・回転）とOpacityのキーフレームで記録します。
+CanvasとXMLは `block-motion.js` の同じ計算を使います。一定区間の中間キーだけを省き、停止開始・再開時刻を残します。
+長文を縮小した場合はRendererが実際に使った文字サイズと配置を渡します。改行は自分で入力しますが、複数行の行間はXML未対応です。
+PremiereのText変換で観察された480行基準のサイズ倍率を補正しています。フォントメトリクスや位置の変換も含め、**今回追加した色・サイズ・配置・動きの再現は現行Premiereで未確認**です。従来の文字編集・フォント確認と区別します。
+
+フチ・影・背景プレート・複合パーツ・縦書き・字間・1文字ずつ・ワイプ・非等方の変形・一部だけの強調・複数行は対応していません。該当する場合は理由を表示して演出XMLの保存を止めます。既存の装飾の試作はブラウザで引き続き確認・JSON保存できます。
+**XMLに通常字幕・背景・画面効果・効果音は含みません。画像・MP4・MOGRTへの置き換えは行いません。**
+
+フォントは「XMLのフォント（PostScript名）」で指定します（初期値 `NotoSansJP-Black`）。PCのフォントから選ぶと実際の書体のPostScript名を入力します。フォント本体は同梱しません。
+`Yu Gothic`や`Noto Sans JP`というファミリー名ではなく、確認済みの`YuGothic-Bold`や`NotoSansJP-Black`を使います。
+Bold/Blackの書体を特定しているので、`fontstyle`はPlain（1）です。
+
+Premiereの「ファイル → 読み込み」でXMLを取り込み、以下を確認します。
+
+1. 3案がそれぞれ正しいフォント・色・サイズ・位置で表示される。
+2. 文章を書き換えられ、モーション・不透明度のキーも調整できる。
+3. 登場・静止・退場を再生し、ラボと比較する。
+4. 保存と再読み込みでも文字と動きが残る。
+
+ラボはローカル専用です。公開版のPremiere ZIP出力は従来のままです。
 
 形式の根拠:
 - [AppleのText generator字幕例](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Applications/Applications.html#//apple_ref/doc/uid/TP30001156-CH6-SW2)
+- [AppleのEffect / Keyframe仕様](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Elements/Elements.html)
 - [Adobeの旧CS6資料](https://helpx.adobe.com/pdf/cs6/premiere_pro_reference.pdf) はText generatorからタイトルへの変換を記載していますが、現行版の保証にはなりません。

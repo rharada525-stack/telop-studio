@@ -7,7 +7,7 @@
 <title>演出ラボ | テロップスタジオ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@800&family=Shippori+Mincho+B1:wght@800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link href="lab.css" rel="stylesheet">
+<link href="lab.css?v=20261022-effects3" rel="stylesheet">
 <link href="../../telop-studio/css/font-picker.css?v=20261022-fonts1" rel="stylesheet">
 </head>
 <body>
@@ -52,6 +52,7 @@
     <label>画面効果<select id="screen"></select></label>
     <hr>
     <label>調整するパーツ<select id="part"></select></label>
+    <label>文字色<input id="fill" type="color" value="#ffd84a"></label>
     <div class="two"><label>文字サイズ<input id="size" type="number" min="12" max="400" step="1"></label><label>傾き（度）<input id="rotate" type="number" min="-180" max="180" step="1"></label></div>
     <div class="two"><label>登場<select id="enter"></select></label><label>退場<select id="exit"></select></label></div>
     <div class="two"><label>1文字ずつ<select id="character"><option value="">なし</option><option value="pop">ポップ</option><option value="type">タイプ</option><option value="drop">落下</option></select></label><label>文字の間隔（秒）<input id="stagger" type="number" min="0" max="0.3" step="0.005"></label></div>
@@ -64,13 +65,15 @@
     <button id="saveAs" type="button" class="ghost">別の試作として保存</button>
     <button id="new" type="button" class="ghost">新しい試作</button>
     <hr>
-    <h2>Premiere用XML（読み込みテスト）</h2>
-    <small id="nativeNote">文字と表示時間のみ。フチ・傾き・動きは含みません。現行Premiereでの文字編集は未確認です。</small>
-    <div id="xmlFontPicker"><label>XMLのフォント（PostScript名）<input id="xmlFont" type="text" value="YuGothic-Bold" maxlength="63"></label></div>
-    <button id="nativeExport" type="button" class="ghost">この文字をXMLに保存（検証用）</button>
-    <button id="nativeBatch" type="button" class="ghost">文字3個のXMLを保存（検証用）</button>
+    <h2>Premiere用XML</h2>
+    <small id="nativeNote">文字編集・フォントは確認済み。新しい色・配置・動きは実機確認用です。演出の文字だけを書き出します。</small>
+    <small id="xmlSupport" role="status"></small>
+    <div id="xmlFontPicker"><label>XMLのフォント（PostScript名）<input id="xmlFont" type="text" value="NotoSansJP-Black" maxlength="63"></label></div>
+    <button id="nativeExport" type="button" class="ghost">この演出をXMLに保存</button>
+    <button id="nativeBatch" type="button" class="ghost">演出3案のXMLを保存</button>
+    <small>3案は元の見本をまとめます。通常字幕・背景・画面効果・効果音は含みません。</small>
   </aside>
 </main>
-<script type="module" src="lab.js?v=20261022-xml-font-id1"></script>
+<script type="module" src="lab.js?v=20261022-effects3"></script>
 </body>
 </html>

@@ -1,10 +1,10 @@
-import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-fonts1';
-import { resolveStyles } from '../../telop-studio/js/telop.js?v=20261022-fonts1';
+import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-effects2';
+import { resolveStyles } from '../../telop-studio/js/telop.js?v=20261022-effects2';
 import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs';
-import { NATIVE_PRESETS, nativeStyles } from './native-presets.mjs';
-import { buildTextXml } from './text-xml.mjs?v=20261022-xml-font-id1';
+import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs?v=20261022-effects2';
+import { XML_PRESETS, nativeStyles } from './native-presets.mjs?v=20261022-effects2';
+import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261022-effects2';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
 
@@ -18,7 +18,7 @@ let saved = [], savedId = '', part = '', t = 0, playing = false, lastTick = 0, a
 let media = null, mediaURL = '', mediaGeneration = 0, background;
 let audioContext, audioNodes = [], audioGeneration = 0;
 let styleDirty = false;
-const styleFields = { size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d' };
+const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d' };
 const audioBuffers = new Map();
 const contexts = { original: $('original').getContext('2d'), preview: $('preview').getContext('2d') };
 const controlIds = ['aspect', 'set', 'text', 'subtitle', 'separate', 'duration', 'position', 'screen', 'name'];
@@ -29,7 +29,8 @@ const idles = { none: 'なし', pulse: '脈動', float: '浮遊', tremble: '震�
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
 function setPreparing(value) {
   preparing = value;
-  for (const id of ['play', 'replay', 'prev', 'next', 'seek', 'png']) $(id).disabled = value;
+  for (const id of ['play', 'replay', 'prev', 'next', 'seek', 'png', 'nativeExport', 'nativeBatch']) $(id).disabled = value;
+  for (const button of $('effects').children) button.disabled = value;
 }
 function options(id, entries) { $(id).replaceChildren(...Object.entries(entries).map(([value, text]) => new Option(text, value))); }
 function persistWorking() {
@@ -76,6 +77,8 @@ async function init() {
 
 function readControls() {
   const out = structuredClone(draft);
+  // 最初のフォント準備中は、まだ空欄のフォームで復元データを上書きしない。
+  if (!prototype) return out;
   for (const id of controlIds) out[id] = id === 'separate' ? $(id).checked : id === 'duration' ? Number($(id).value) : $(id).value;
   if (styleDirty) {
     const st = structuredClone(prototype.styles[part]);
@@ -149,13 +152,16 @@ async function setDraft(next, resetTime = false) {
 function syncStyle() {
   styleDirty = false;
   const st = prototype.styles[part];
-  const values = { size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18 };
+  const values = { fill: /^#[\da-f]{6}$/i.test(st.fill) ? st.fill : '#ffffff', size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18 };
   for (const [id, value] of Object.entries(values)) $(id).value = value;
   for (const id of ['size', 'rotate', 'enter', 'character', 'stagger', 'idle']) $(id).disabled = !!st.group;
+  $('fill').disabled = !!st.group || !/^#[\da-f]{6}$/i.test(st.fill);
   const child = part !== scene.style && prototype.styles[scene.style].group;
   for (const id of ['exit', 'outDuration']) { $(id).disabled = !!child; $(id).title = child ? '退場は「全体（見出し＋本文）」で調整します' : ''; }
   $('json').value = JSON.stringify(st, null, 2);
-  $('nativeExport').disabled = !draft.fx || !draft.text.trim();
+  const warnings = xmlStyleWarnings(prototype.styles[scene.style], draft.text);
+  $('nativeExport').disabled = !draft.fx || !draft.text.trim() || !!warnings.length;
+  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の3案から選べます。` : '色・サイズ・位置・傾き・動きをXMLに保存できます。';
 }
 
 function bind() {
@@ -252,13 +258,26 @@ async function exportNative(batch) {
   try {
     if (!await setDraft(readControls())) return;
     const W = prototype.W, H = prototype.H;
-    const items = batch ? Object.values(NATIVE_PRESETS).map((preset, index) => ({ text: preset.sample, t: index * 4 + .5, d: 3 }))
-      : [{ text: draft.text, t: scene.start, d: draft.duration }];
-    const name = batch ? '演出ラボ_文字3個_読み込みテスト' : '演出ラボ_文字1個_読み込みテスト';
+    // 実際の描画で決まった縮小後のサイズ・配置を渡す。設定値のままだと長文がはみ出す。
+    const renderedItem = (renderer, styleId) => {
+      const item = renderer.items.find(item => item.style === styleId);
+      if (!item?.obj?.block) throw new Error('単一のテキストを選んでください。');
+      return { text: item.text, t: item.t, d: item.d, style: { ...renderer.styles[styleId],
+        size: item.obj.block.size, pos: [item.obj.center(), item.obj.centerY()] } };
+    };
+    let items;
+    if (batch) {
+      items = [];
+      for (const [id, preset] of Object.entries(XML_PRESETS)) {
+        const result = await prepare({ ...newDraft(), aspect: draft.aspect, fx: id, text: preset.sample, separate: false });
+        items.push({ ...renderedItem(result.changed, id), t: items.length * 4 + .5 });
+      }
+    } else items = [renderedItem(prototype, scene.style)];
+    const name = batch ? '演出ラボ_演出3案' : `演出ラボ_${draft.name.replace(/[\\/:*?"<>|]/g, '_')}`;
     const fontName = $('xmlFont').value;
     const xml = buildTextXml({ name, W, H, items, fontName });
     download(new Blob([xml], { type: 'application/xml;charset=utf-8' }), `${name}_${fontName.replace(/[\\/:*?"<>|]/g, '_')}.xml`);
-    status('テスト用XMLを保存しました。Premiereの「ファイル → 読み込み」で取り込み、文字を書き換えられるか確認してください。装飾・動きは含みません。');
+    status('演出XMLを保存しました。Premiereの「ファイル → 読み込み」で開けます。今回追加した色・配置・動きの再現は実機で確認してください。');
   } catch (error) { status(`Premiere用データを保存できません: ${error.message}`, true); }
 }
 

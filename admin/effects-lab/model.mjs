@@ -2,7 +2,7 @@
 import { FX, buildItems } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS, setDesign } from '../../telop-studio/js/sets.js';
 import { designToStyle } from '../../telop-studio/js/design.js';
-import { NATIVE_PRESETS } from './native-presets.mjs';
+import { NATIVE_PRESETS } from './native-presets.mjs?v=20261022-effects2';
 export const EFFECTS = { ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, { name: preset.name, style: id }])), ...FX };
 
 export const STORAGE_KEY = 'telop-studio:effects-lab:v1';
@@ -19,8 +19,8 @@ export const SAMPLES = {
   brush: '{挑戦}はここから', '': '画面効果のテスト',
 };
 export function newDraft() {
-  return { version: 1, name: '新しい試作', fx: 'keyword', aspect: 'landscape', set: 'standard',
-    text: SAMPLES.keyword, subtitle: '字幕と演出の重なりも確認できます', separate: true,
+  return { version: 1, name: '新しい試作', fx: 'xml_pop', aspect: 'landscape', set: 'standard',
+    text: SAMPLES.xml_pop, subtitle: '字幕と演出の重なりも確認できます', separate: false,
     position: 'auto', screen: 'auto', duration: 3, overrides: { portrait: {}, landscape: {} } };
 }
 
@@ -81,9 +81,11 @@ export function sceneFor(draft) {
     speakers: [{ id: 'A', design }] };
   if (native) settings.fxMap = { ...settings.fxMap, keyword: draft.fx };
   const lines = [{ id: 'test', src: [start, end], text: draft.separate ? draft.subtitle : draft.text,
-    fx: native ? 'keyword' : draft.fx, fxText: draft.separate ? draft.text : '', fxPos: draft.position, screen: draft.screen, speaker: 'A' }];
+    fx: native ? 'keyword' : draft.fx, fxText: draft.separate || native ? draft.text : '',
+    fxPos: draft.position === 'auto' && native ? NATIVE_PRESETS[draft.fx].position || 'auto' : draft.position, screen: draft.screen, speaker: 'A' }];
   const items = buildItems(lines, [{ start: 0, end: total, out: 0 }], settings)
-    .filter(item => draft.fx || draft.separate || !item.style.startsWith('subtitle'));
+    .filter(item => draft.separate || !item.style.startsWith('subtitle'))
+    .map(item => native && item.style === draft.fx ? { ...item, t: start, d: draft.duration } : item);
   return { total, start, end, items,
     subtitle: designToStyle(design, draft.aspect), style: native ? draft.fx : settings.fxMap[draft.fx] || FX[draft.fx]?.style || 'subtitle' };
 }

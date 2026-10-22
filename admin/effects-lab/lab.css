@@ -9,6 +9,7 @@ h1,h2{font-size:15px;margin:0 0 16px}button,input,select,textarea{font:inherit}b
 button:disabled{opacity:.35;cursor:default}button.ghost,.file-button{border-color:var(--line);background:transparent;color:var(--text)}button:hover:not(:disabled),.file-button:hover{filter:brightness(1.18)}
 input:not([type=checkbox]):not([type=range]),select,textarea{width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--text);padding:9px}
 textarea{resize:vertical;line-height:1.6}input[type=checkbox],input[type=range]{accent-color:var(--accent)}input[type=range]{width:100%;cursor:pointer}
+input[type=color]{height:40px;padding:4px!important;cursor:pointer}
 label{display:block;color:var(--muted);font-size:12px}label>input:not([type=checkbox]),label>select,label>textarea{margin-top:6px}label:has([type=checkbox]){display:flex;align-items:center;gap:6px;color:var(--text)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,.file-button:focus-within{outline:2px solid var(--accent);outline-offset:3px}
 nav{display:grid;gap:5px;margin:14px 0 24px}nav button{text-align:left;border:1px solid transparent;background:transparent;color:var(--muted);font-weight:500;padding:10px;font-size:12px}nav button[aria-pressed=true]{background:#ff476615;color:var(--text);border-color:var(--accent)}

@@ -10,7 +10,7 @@ const names = [...Object.keys(raw).filter(key => !key.startsWith('_')), ...Objec
 
 test('全演出・全デザインセット・縦横を本体の時刻とスタイルで試せる', () => {
   for (const aspect of ['portrait', 'landscape']) for (const set of ['standard', 'entertainment', 'business']) for (const fx of Object.keys(FX)) {
-    const draft = { ...newDraft(), aspect, set, fx, text: SAMPLES[fx] };
+    const draft = { ...newDraft(), aspect, set, fx, text: SAMPLES[fx], separate: true };
     const scene = sceneFor(draft);
     assert.ok(scene.items.length > 0);
     assert.ok(scene.items.every(item => item.t >= 0 && item.t + item.d <= scene.total + 1e-8));

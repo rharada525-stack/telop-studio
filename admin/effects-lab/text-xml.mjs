@@ -1,9 +1,56 @@
-// FCP 7 XML Text generatorによる、文字と表示時間だけの読み込みテスト。
-// 現行Premiereでの文字編集は未検証。ラボの装飾・アニメーションは出力しない。
+// ユーザーが文字編集・フォントを確認したFCP 7 Text generatorを維持する。
+// 新しい色・サイズ・Motion/Opacityの取り込み結果は別途実機で確認する。
 // https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Applications/Applications.html
+import { blockState } from '../../telop-studio/js/block-motion.js';
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[ch]));
 const rate = '<rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>';
 const parameter = (id, name, value) => `<parameter><parameterid>${id}</parameterid><name>${name}</name><value>${value}</value></parameter>`;
+const num = n => String(Number(n.toFixed(6)));
+const point = (x, y) => `<horiz>${num(x)}</horiz><vert>${num(y)}</vert>`;
+const enters = new Set(['none', 'slam', 'pop', 'drop', 'elastic', 'slide_left', 'slide_right', 'slide_up', 'fade', 'fade_up', 'bounce', 'zoom_in']);
+const exits = new Set(['none', 'fade', 'zoom_out', 'pop_out', 'shrink', 'slide_out_left', 'slide_out_right']);
+const idles = new Set(['none', 'pulse', 'float', 'tremble', 'wobble']);
+
+export function xmlStyleWarnings(st, text = '') {
+  if (!st) return ['演出を選んでください'];
+  const reasons = [];
+  if (st.group || st.effect || st.vertical) reasons.push('複合パーツ・画面効果・縦書き');
+  if (st.strokes?.some(s => s.w > 0)) reasons.push('フチ');
+  if (st.shadows?.length) reasons.push('影');
+  if (st.plate) reasons.push('背景プレート');
+  if (!/^#[\da-f]{6}$/i.test(st.fill || '')) reasons.push('単色以外の塗り');
+  if (st.char) reasons.push('1文字ずつの動き');
+  if (!enters.has(st.in || 'none') || !exits.has(st.out || 'fade') || !idles.has(st.idle || 'none')) reasons.push('ワイプ・変形などの動き');
+  if (st.tracking) reasons.push('字間の指定');
+  if (/[{}\[\]]/.test(text) && (st.accent || st.accent2 || st.accent_scale && st.accent_scale !== 1)) reasons.push('一部だけの強調');
+  if (/[\r\n]/.test(text)) reasons.push('複数行の行間');
+  return reasons;
+}
+
+// 30fpsの画面と同じ値を使用。一定区間の中間キーだけを省き、止まる時刻は残す。
+export function motionSamples(style, frames, W, H) {
+  const pos = style.pos || [W / 2, H / 2];
+  return Array.from({ length: frames + 1 }, (_, frame) => {
+    const state = blockState(style, frame / 30, frames / 30);
+    return { frame, scale: num(state.s * 100), rotation: num((style.rotate || 0) + state.rot),
+      center: point((pos[0] + state.dx - W / 2) / W, (pos[1] + state.dy - H / 2) / H), opacity: num(state.op * 100) };
+  });
+}
+function motionParameter(id, name, samples, min, max) {
+  const values = samples.map(s => s[id]);
+  const keys = values.every(v => v === values[0]) ? '' : samples.filter((s, i) =>
+    i === 0 || i === samples.length - 1 || s[id] !== samples[i - 1][id] || s[id] !== samples[i + 1][id])
+    .map(s => `<keyframe><when>${s.frame}</when><value>${s[id]}</value></keyframe>`).join('');
+  return `<parameter authoringApp="PremierePro"><parameterid>${id}</parameterid><name>${name}</name>` +
+    (min == null ? '' : `<valuemin>${min}</valuemin><valuemax>${max}</valuemax>`) + `<value>${values[0]}</value>${keys}</parameter>`;
+}
+function motionFilters(style, frames, W, H) {
+  const samples = motionSamples(style, frames, W, H);
+  const effect = (id, name, body) => `<filter><effect><name>${name}</name><effectid>${id}</effectid><effectcategory>motion</effectcategory><effecttype>motion</effecttype><mediatype>video</mediatype>${body}</effect></filter>`;
+  return effect('basic', 'Basic Motion', motionParameter('scale', 'Scale', samples, 0, 1000) +
+    motionParameter('rotation', 'Rotation', samples, -8640, 8640) + motionParameter('center', 'Center', samples)) +
+    effect('opacity', 'Opacity', motionParameter('opacity', 'Opacity', samples, 0, 100));
+}
 
 export function plainText(text) {
   // ブラウザプレビューの強調マーカーを外し、XML 1.0で使えない制御文字を除く。
@@ -22,22 +69,36 @@ export function buildTextXml({ name = '演出ラボ_文字の読み込みテス�
     if (!Number.isFinite(item.t) || item.t < 0 || !Number.isFinite(item.d) || item.d <= 0 || item.t + item.d > 3600) throw new Error('表示時間が不正です。');
     const start = Math.round(item.t * 30), end = Math.round((item.t + item.d) * 30);
     if (end <= start) throw new Error('表示時間は1フレーム以上にしてください。');
-    return { text, start, end, index };
+    const style = item.style;
+    if (style) {
+      const warnings = xmlStyleWarnings(style, item.text);
+      if (warnings.length) throw new Error(`このXMLにはまだ渡せません: ${warnings.join('・')}`);
+      if (!Number.isFinite(style.size) || style.size < 1 || style.size > 400 ||
+          style.rotate != null && (!Number.isFinite(style.rotate) || Math.abs(style.rotate) > 180) ||
+          style.out_d != null && (!Number.isFinite(style.out_d) || style.out_d < 0 || style.out_d > 3) ||
+          style.pos != null && (!Array.isArray(style.pos) || style.pos.length !== 2 || !style.pos.every(n => Number.isFinite(n) && Math.abs(n) <= 10000))) throw new Error('文字サイズ・位置・傾き・退場時間が不正です。');
+    }
+    return { text, start, end, index, style };
   }).sort((a, b) => a.start - b.start);
   if (clips.some((clip, i) => i && clip.start < clips[i - 1].end)) throw new Error('文字の表示時間を重ねないでください。');
-  const generators = clips.map(({ text, start, end, index }) => `<generatoritem id="text-${index + 1}">
+  const generators = clips.map(({ text, start, end, index, style }) => {
+    const rgb = style ? style.fill.slice(1).match(/../g).map(n => parseInt(n, 16)) : [255, 255, 255];
+    // PremiereのFCP Text変換は480行基準。既存の読み込み用XMLはそのまま保持。
+    const size = style ? num(style.size * 480 / H) : String(Math.round(H * .075));
+    return `<generatoritem id="text-${index + 1}">
 <name>${esc(text.replace(/\n/g, ' '))}</name><duration>${end - start}</duration>${rate}
 <in>0</in><out>${end - start}</out><start>${start}</start><end>${end}</end>
 <enabled>TRUE</enabled><anamorphic>FALSE</anamorphic><alphatype>black</alphatype>
 <effect id="text-effect-${index + 1}"><name>Text</name><effectid>Text</effectid><effectcategory>Text</effectcategory><effecttype>generator</effecttype><mediatype>video</mediatype>
 ${parameter('str', 'Text', esc(text).replace(/\n/g, '&#13;'))}
 ${parameter('fontname', 'Font', esc(fontName.trim()))}
-${parameter('fontsize', 'Size', String(Math.round(H * .075)))}
+${parameter('fontsize', 'Size', size)}
 ${parameter('fontstyle', 'Style', '1')}
 ${parameter('fontalign', 'Alignment', '2')}
-${parameter('fontcolor', 'Font Color', '<alpha>255</alpha><red>255</red><green>255</green><blue>255</blue>')}
+${parameter('fontcolor', 'Font Color', `<alpha>255</alpha><red>${rgb[0]}</red><green>${rgb[1]}</green><blue>${rgb[2]}</blue>`)}
 ${parameter('origin', 'Origin', '<horiz>0</horiz><vert>0</vert>')}
-</effect><sourcetrack><mediatype>video</mediatype></sourcetrack></generatoritem>`).join('\n');
+</effect>${style ? motionFilters(style, end - start, W, H) : ''}<sourcetrack><mediatype>video</mediatype></sourcetrack></generatoritem>`;
+  }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xmeml>
 <xmeml version="5"><sequence id="effects-lab-text-test">
