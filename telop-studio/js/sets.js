@@ -5,15 +5,13 @@ const stroke = (color, width) => ({ color, width, gradient: false, color2: "#555
 
 export const DESIGN_SETS = {
   standard: {
-    name: "標準（テレビ風）",
-    note: "白文字＋黒フチの字幕と、カラフルな演出テロップ",
+    name: "標準",
     subtitle: DEFAULT_DESIGN,
     fxMap: {},
     autoMode: null,
   },
   entertainment: {
     name: "エンタメ切り抜き風（ショート向け）",
-    note: "太い字幕、画面いっぱいの縦書き、黒枠の白い箱。オチは筆文字",
     subtitle: {
       ...DEFAULT_DESIGN,
       size: 64,
@@ -30,7 +28,6 @@ export const DESIGN_SETS = {
   },
   business: {
     name: "ビジネス講義風（長尺向け）",
-    note: "下の黒帯に白い明朝の字幕、要点は大きな2色の強調、見出しは左上のコーナー名",
     subtitle: {
       ...DEFAULT_DESIGN,
       family: "Shippori Mincho B1",

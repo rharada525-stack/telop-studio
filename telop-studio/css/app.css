@@ -117,12 +117,11 @@ tr.is-cut textarea { text-decoration: line-through; }
 .auto-bar .status { flex: 1 1 100%; margin: 0; }
 .auto-bar .hl-switch { flex: 1 1 100%; color: var(--text); font-size: 12px; }
 
-/* 素材の設定：画面設定は同じ行、デザインセットと説明は全幅でまとめる */
+/* 素材の設定：画面設定は同じ行、デザインセットは全幅でまとめる */
 .source-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 14px 12px; align-items: start; }
 .source-settings label, .design-set-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
 .source-settings select, .source-settings input { width: 100%; min-width: 0; }
 .design-set-field, .source-settings .title-field { grid-column: 1 / -1; }
-.set-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 
 .save-manager { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
 .save-manager h3 { margin: 0 0 6px; font-size: 13px; }
@@ -185,7 +184,6 @@ tr.is-cut textarea { text-decoration: line-through; }
 .save-name { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin: 12px 0; }
 .save-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .save-actions button { white-space: normal; text-align: left; }
-.save-note { margin: 8px 0 0; }
 .model-storage { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
 .model-storage summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .model-storage[open] summary { margin-bottom: 8px; }
