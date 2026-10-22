@@ -2,7 +2,7 @@
 import { FX, buildItems } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS, setDesign } from '../../telop-studio/js/sets.js';
 import { designToStyle } from '../../telop-studio/js/design.js';
-import { NATIVE_PRESETS } from './native-presets.mjs?v=20261022-effects2';
+import { NATIVE_PRESETS } from './native-presets.mjs?v=20261023-tv1';
 export const EFFECTS = { ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, { name: preset.name, style: id }])), ...FX };
 
 export const STORAGE_KEY = 'telop-studio:effects-lab:v1';
@@ -77,15 +77,17 @@ export function sceneFor(draft) {
   const start = 0.5, end = start + draft.duration, total = end + 0.7;
   const design = setDesign(draft.set);
   const native = Object.hasOwn(NATIVE_PRESETS, draft.fx);
+  const effectStyle = native ? draft.fx : DESIGN_SETS[draft.set].fxMap[draft.fx] || FX[draft.fx]?.style || 'subtitle';
   const settings = { aspect: draft.aspect, autoHighlight: false, fxMap: DESIGN_SETS[draft.set].fxMap,
     speakers: [{ id: 'A', design }] };
   if (native) settings.fxMap = { ...settings.fxMap, keyword: draft.fx };
   const lines = [{ id: 'test', src: [start, end], text: draft.separate ? draft.subtitle : draft.text,
     fx: native ? 'keyword' : draft.fx, fxText: draft.separate || native ? draft.text : '',
-    fxPos: draft.position === 'auto' && native ? NATIVE_PRESETS[draft.fx].position || 'auto' : draft.position, screen: draft.screen, speaker: 'A' }];
+    fxPos: draft.position === 'auto' && draft.aspect === 'landscape' ? 'bottom' : draft.position === 'auto' && native ? NATIVE_PRESETS[draft.fx].position || 'auto' : draft.position, screen: draft.screen, speaker: 'A' }];
   const items = buildItems(lines, [{ start: 0, end: total, out: 0 }], settings)
     .filter(item => draft.separate || !item.style.startsWith('subtitle'))
-    .map(item => native && item.style === draft.fx ? { ...item, t: start, d: draft.duration } : item);
+    .map(item => ({ ...item, ...(native && item.style === draft.fx ? { t: start, d: draft.duration } : {}),
+      ...(draft.aspect === 'landscape' && draft.position === 'auto' && draft.fx && item.style === effectStyle ? { pos: [960, 900] } : {}) }));
   return { total, start, end, items,
-    subtitle: designToStyle(design, draft.aspect), style: native ? draft.fx : settings.fxMap[draft.fx] || FX[draft.fx]?.style || 'subtitle' };
+    subtitle: designToStyle(design, draft.aspect), style: effectStyle };
 }

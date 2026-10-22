@@ -2,9 +2,9 @@ import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-effect
 import { resolveStyles } from '../../telop-studio/js/telop.js?v=20261022-effects2';
 import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs?v=20261022-effects2';
-import { XML_PRESETS, nativeStyles } from './native-presets.mjs?v=20261022-effects2';
-import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261022-effects2';
+import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs?v=20261023-tv1';
+import { XML_PRESETS, nativeStyles } from './native-presets.mjs?v=20261023-tv1';
+import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-tv1';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
 
@@ -161,7 +161,7 @@ function syncStyle() {
   $('json').value = JSON.stringify(st, null, 2);
   const warnings = xmlStyleWarnings(prototype.styles[scene.style], draft.text);
   $('nativeExport').disabled = !draft.fx || !draft.text.trim() || !!warnings.length;
-  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の3案から選べます。` : '色・サイズ・位置・傾き・動きをXMLに保存できます。';
+  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の3案から選べます。` : '文字・多重フチ・位置・動きをXMLに保存できます。';
 }
 
 function bind() {
@@ -277,7 +277,7 @@ async function exportNative(batch) {
     const fontName = $('xmlFont').value;
     const xml = buildTextXml({ name, W, H, items, fontName });
     download(new Blob([xml], { type: 'application/xml;charset=utf-8' }), `${name}_${fontName.replace(/[\\/:*?"<>|]/g, '_')}.xml`);
-    status('演出XMLを保存しました。Premiereの「ファイル → 読み込み」で開けます。今回追加した色・配置・動きの再現は実機で確認してください。');
+    status('演出XMLを保存しました。Premiereの「ファイル → 読み込み」で開き、文字・フチ・動きを調整できます。');
   } catch (error) { status(`Premiere用データを保存できません: ${error.message}`, true); }
 }
 

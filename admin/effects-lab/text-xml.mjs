@@ -1,7 +1,8 @@
-// ユーザーが文字編集・フォントを確認したFCP 7 Text generatorを維持する。
-// 新しい色・サイズ・Motion/Opacityの取り込み結果は別途実機で確認する。
+// 単色は従来のText generator、フチ付きはPremiereのSource Textを使う。
+// 2026-10-23、Premiere 2026で横長のNoto Sans JP Black・多重フチ・文字編集を確認。
 // https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Applications/Applications.html
 import { blockState } from '../../telop-studio/js/block-motion.js';
+import { makeTextData, base64 } from './source-text.mjs';
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[ch]));
 const rate = '<rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>';
 const parameter = (id, name, value) => `<parameter><parameterid>${id}</parameterid><name>${name}</name><value>${value}</value></parameter>`;
@@ -15,7 +16,7 @@ export function xmlStyleWarnings(st, text = '') {
   if (!st) return ['演出を選んでください'];
   const reasons = [];
   if (st.group || st.effect || st.vertical) reasons.push('複合パーツ・画面効果・縦書き');
-  if (st.strokes?.some(s => s.w > 0)) reasons.push('フチ');
+  if (st.strokes && (!Array.isArray(st.strokes) || st.strokes.length > 4 || st.strokes.some(s => !Number.isFinite(s.w) || s.w < 0 || s.w > 80 || !/^#[\da-f]{6}$/i.test(s.color)))) reasons.push('単色以外・範囲外のフチ');
   if (st.shadows?.length) reasons.push('影');
   if (st.plate) reasons.push('背景プレート');
   if (!/^#[\da-f]{6}$/i.test(st.fill || '')) reasons.push('単色以外の塗り');
@@ -52,6 +53,26 @@ function motionFilters(style, frames, W, H) {
     effect('opacity', 'Opacity', motionParameter('opacity', 'Opacity', samples, 0, 100));
 }
 
+// Premiere自身の書き出すGraphicAndType XML。1クリップ内の1つの文字にフチを持たせる。
+// Text generatorによる単色の読み込み経路は下に残し、フチ付きの場合だけこちらを使う。
+function graphicClip({ text, start, end, index, style }, W, H, fontName) {
+  const id = index + 1, frames = end - start;
+  const nativeParameter = (id, name, value) => `<parameter authoringApp="PremierePro"><parameterid>${id}</parameterid><name>${name}</name><value>${esc(value)}</value></parameter>`;
+  const still = value => `-91445760000000000,${value},0,0,0,0,0,0`;
+  // ブラウザの文字ブロックは高さsize、ベースライン0.88*size。中央との差は0.38*size。
+  const baseline = .5 + style.size * .38 / H;
+  return `<clipitem id="graphic-${id}"><name>${esc(text)}</name><duration>${frames}</duration>${rate}<start>${start}</start><end>${end}</end><in>0</in><out>${frames}</out><enabled>TRUE</enabled><alphatype>straight</alphatype><pixelaspectratio>square</pixelaspectratio><anamorphic>FALSE</anamorphic>
+<file id="graphic-file-${id}"><name>Graphic</name><mediaSource>GraphicAndType</mediaSource>${rate}<media><video><samplecharacteristics>${rate}<width>${W}</width><height>${H}</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media></file>
+<filter><effect><name>${esc(text)}</name><effectid>GraphicAndType</effectid><effectcategory>graphic</effectcategory><effecttype>filter</effecttype><mediatype>video</mediatype><pproBypass>false</pproBypass>
+<parameter authoringApp="PremierePro"><parameterid>1</parameterid><name>Source Text</name><hash>${crypto.randomUUID()}</hash><value>${base64(makeTextData(text, style, fontName))}</value></parameter>
+${nativeParameter(2, 'Transform', still('false'))}
+${nativeParameter(3, 'Position', `${still(`0.5:${num(baseline)}`)},5,4,0,0,0,0`)}
+${nativeParameter(4, 'Scale', still('100.'))}${nativeParameter(5, 'Horizontal Scale', still('100.'))}${nativeParameter(6, 'Uniform Scale', still('true'))}
+${nativeParameter(7, 'Rotation', still('0.'))}${nativeParameter(8, 'Opacity', still('100.'))}
+${nativeParameter(9, 'Anchor Point', `${still('0:0')},5,4,0,0,0,0`)}
+</effect></filter>${motionFilters(style, frames, W, H)}</clipitem>`;
+}
+
 export function plainText(text) {
   // ブラウザプレビューの強調マーカーを外し、XML 1.0で使えない制御文字を除く。
   return String(text).replace(/[{}\[\]]/g, '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '');
@@ -82,6 +103,7 @@ export function buildTextXml({ name = '演出ラボ_文字の読み込みテス�
   }).sort((a, b) => a.start - b.start);
   if (clips.some((clip, i) => i && clip.start < clips[i - 1].end)) throw new Error('文字の表示時間を重ねないでください。');
   const generators = clips.map(({ text, start, end, index, style }) => {
+    if (style?.strokes?.some(s => s.w > 0)) return graphicClip({ text, start, end, index, style }, W, H, fontName);
     const rgb = style ? style.fill.slice(1).match(/../g).map(n => parseInt(n, 16)) : [255, 255, 255];
     // PremiereのFCP Text変換は480行基準。既存の読み込み用XMLはそのまま保持。
     const size = style ? num(style.size * 480 / H) : String(Math.round(H * .075));

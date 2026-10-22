@@ -60,33 +60,83 @@ test('壊れたprprojの出力をUIから撤去し、XMLの検証範囲を表示
   const html = await readFile(new URL('../admin/effects-lab/index.html', import.meta.url), 'utf8');
   const js = await readFile(new URL('../admin/effects-lab/lab.js', import.meta.url), 'utf8');
   assert.doesNotMatch(html + js, /\.prproj|native-seed|native-project|compressProject/);
-  assert.match(html, /文字編集・フォントは確認済み/);
-  assert.match(html, /新しい色・配置・動きは実機確認用/);
+  assert.match(html, /Premiereで文字編集・フォント・多重フチを確認済み/);
   assert.match(html, /通常字幕・背景・画面効果・効果音は含みません/);
 });
 
-test('3案の色・サイズ・位置・傾きとMotion/Opacityを書き、文字はTextのまま保持する', () => {
+function sourceData(xml) {
+  const encoded = xml.match(/<name>Source Text<\/name><hash>[^<]+<\/hash><value>([^<]+)<\/value>/)?.[1];
+  assert.ok(encoded, 'Source Textを持つ');
+  const bytes = Buffer.from(encoded, 'base64');
+  assert.equal(bytes.readUInt32LE(0), bytes.length - 12);
+  assert.equal(bytes.readUInt32LE(8), 0x11223344);
+  const table = p => {
+    const vt = p - bytes.readInt32LE(p), count = (bytes.readUInt16LE(vt) - 4) / 2;
+    return Object.fromEntries(Array.from({ length: count }, (_, i) => [i, bytes.readUInt16LE(vt + 4 + i * 2)]).filter(([, off]) => off).map(([i, off]) => [i, p + off]));
+  };
+  const ref = p => p + bytes.readUInt32LE(p);
+  const string = p => bytes.toString('utf8', p + 4, p + 4 + bytes.readUInt32LE(p));
+  const root = table(12 + bytes.readUInt32LE(12)), paragraph = table(ref(root[0]));
+  const runs = ref(paragraph[0]), part = table(ref(runs + 4)), character = table(ref(part[1]));
+  const fonts = ref(paragraph[1]);
+  const rgb = p => { const t = table(ref(p)); return [0, 1, 2].map(k => bytes.readUInt32LE(t[k])); };
+  return { bytes, table, ref, character, paragraph, text: string(ref(part[0])), font: string(ref(fonts + 4)), rgb };
+}
+
+test('フチ付き3案は1クリップ1文字レイヤーと編集可能なフチ・Motion/Opacityを持つ', () => {
   for (const aspect of ['portrait', 'landscape']) {
     const [W, H] = aspect === 'portrait' ? [1080, 1920] : [1920, 1080];
     const styles = nativeStyles(aspect);
     for (const [id, preset] of Object.entries(XML_PRESETS)) {
       const style = styles[id];
       assert.deepEqual(xmlStyleWarnings(style, preset.sample), []);
-      const xml = buildTextXml({ W, H, items: [{ text: preset.sample, t: .5, d: 3, style }] });
-      assert.match(xml, /<effectid>Text<\/effectid>/);
+      const xml = buildTextXml({ W, H, items: [{ text: preset.sample, t: .5, d: 3, style }], fontName: 'NotoSansJP-Black' });
+      assert.equal((xml.match(/<clipitem /g) || []).length, 1);
+      assert.equal((xml.match(/<name>Source Text<\/name>/g) || []).length, 1);
+      assert.match(xml, /<mediaSource>GraphicAndType<\/mediaSource>/);
       assert.match(xml, /<effectid>basic<\/effectid>/);
       assert.match(xml, /<effectid>opacity<\/effectid>/);
-      const size = Number((style.size * 480 / H).toFixed(6));
-      assert.ok(xml.includes(`<parameterid>fontsize</parameterid><name>Size</name><value>${size}</value>`));
-      const [r, g, b] = style.fill.slice(1).match(/../g).map(n => parseInt(n, 16));
-      assert.ok(xml.includes(`<red>${r}</red><green>${g}</green><blue>${b}</blue>`));
+      const d = sourceData(xml);
+      assert.equal(d.font, 'NotoSansJP-Black'); assert.equal(d.text, preset.sample);
+      assert.equal(d.bytes.readFloatLE(d.character[1]), style.size);
+      assert.equal(d.bytes.readUInt32LE(d.paragraph[4]), 2, '段落中央揃え');
+      assert.equal(d.bytes.readUInt32LE(d.paragraph[26]), 1, '多重フチの描画を有効にする');
+      const rgb = style.fill.slice(1).match(/../g).map(n => parseInt(n, 16));
+      assert.deepEqual(d.rgb(d.character[2]), rgb);
+      assert.equal(d.bytes.readFloatLE(d.character[6]), style.strokes[0].w);
+      const strokes = d.ref(d.character[17]);
+      assert.equal(d.bytes.readUInt32LE(strokes), style.strokes.length - 1);
+      style.strokes.slice(1).forEach((stroke, i) => {
+        const t = d.table(d.ref(strokes + 4 + i * 4));
+        assert.equal(d.bytes.readFloatLE(t[2]), stroke.w);
+        assert.equal(d.bytes.readUInt32LE(t[5]), 2, 'フチを外側へ描く');
+        assert.deepEqual(d.rgb(t[0]), stroke.color.slice(1).match(/../g).map(n => parseInt(n, 16)));
+      });
       assert.match(xml, /<keyframe><when>90<\/when><value>0<\/value><\/keyframe>/);
-      assert.doesNotMatch(xml, /<file\b|<pathurl>|\.png|\.mp4|\.mogrt|SourceText|AE\.ADBE/);
+      assert.doesNotMatch(xml, /<pathurl>|\.png|\.mp4|\.mogrt/);
       const frames = [...xml.matchAll(/<when>(\d+)<\/when>/g)].map(m => Number(m[1]));
       assert.ok(frames.every(f => f >= 0 && f <= 90));
-      // 停止している2秒間に毎フレームのキーを作らない。
       assert.ok(frames.length < 150);
     }
+  }
+});
+
+test('フチを外した場合も、従来のText generatorとPostScript名を維持する', () => {
+  const style = { ...nativeStyles('landscape').xml_pop, strokes: [] };
+  const xml = buildTextXml({ items: [{ text: '確認', t: .5, d: 3, style }], fontName: 'YuGothic-Bold' });
+  assert.match(xml, /<generatoritem /);
+  assert.match(xml, /<effectid>Text<\/effectid>/);
+  assert.match(xml, /<value>YuGothic-Bold<\/value>/);
+  assert.doesNotMatch(xml, /GraphicAndType/);
+});
+
+test('横長のおまかせ位置は全案とも下中央、3案の標準の傾きは0度', () => {
+  for (const [id, preset] of Object.entries(XML_PRESETS)) {
+    const scene = sceneFor({ ...newDraft(), fx: id, text: preset.sample });
+    assert.deepEqual(scene.items.find(item => item.style === id).pos, [960, 900]);
+    assert.equal(nativeStyles('landscape')[id].rotate || 0, 0);
+    const top = sceneFor({ ...newDraft(), fx: id, text: preset.sample, position: 'top' });
+    assert.deepEqual(top.items.find(item => item.style === id).pos, [960, 200], '指定した位置は優先する');
   }
 });
 
@@ -101,13 +151,13 @@ test('ポップの跳ね返り・スライドの移動・スラムの揺れと�
   assert.equal(slide[0].center, '<horiz>-0.46875</horiz><vert>0</vert>');
   assert.equal(slide[15].center, '<horiz>0</horiz><vert>0</vert>');
   const slam = motionSamples(styles.xml_reaction, 90, 1920, 1080);
-  assert.equal(slam[0].scale, '260'); assert.equal(slam[30].rotation, '-6');
+  assert.equal(slam[0].scale, '260'); assert.equal(slam[30].rotation, '0');
   assert.notEqual(slam[7].center, slam[30].center);
 });
 
 test('対応していない装飾を黙って落とさず、保存を止めて理由を返す', () => {
   const style = nativeStyles('landscape').xml_pop;
-  for (const change of [{ strokes: [{ w: 8 }] }, { shadows: [{ dx: 1 }] }, { plate: {} }, { fill: ['red', 'blue'] },
+  for (const change of [{ strokes: [{ w: 8, color: ['red', 'blue'] }] }, { shadows: [{ dx: 1 }] }, { plate: {} }, { fill: ['red', 'blue'] },
     { in: 'wipe' }, { in: 'jelly' }, { out: 'wipe_out' }, { char: 'pop' }, { vertical: true }, { group: true }, { tracking: .1 }]) {
     const invalid = { ...style, ...change };
     assert.ok(xmlStyleWarnings(invalid).length);

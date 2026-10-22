@@ -25,39 +25,40 @@ PowerShellで `./admin/effects-lab/Start-Lab.ps1` を実行し、表示された
 
 ## Premiere用テキストXML
 
-ユーザーのPremiereで、PostScript名を指定したFCP 7 Text generatorの読み込み・フォント表示・文字編集を確認済みです（2026-10-22のユーザー報告）。この形式を維持します。直接生成 `.prproj` は開けなかったため撤去済みです。
+2026-10-22にユーザーのPremiereで、PostScript名を指定したFCP 7 Text generatorの読み込み・フォント表示・文字編集を確認済みです。
+2026-10-23には、Premiere 2026の別の検証用プロジェクトで、フチ付きのGraphicAndType XMLの表示・文字書き換え・Undo/Redo・保存と、登場の拡大・不透明度変化を実機確認しました。元のユーザープロジェクトは変更・保存していません。
 
-第一弾は一覧上部の［XML］付き3案です。
+一覧上部の［XML］付き3案はテレビ風の多重フチです。
 
-- 強調・ポップ: 黄色の文字が跳ね返りながら拡大。
-- ツッコミ・赤スラム: 赤い文字を斜めに叩きつけ、短く揺らす。
-- 見出し・スライド: 水色の文字を左から滑らせる。
+- 強調・ポップ: 黄色＋黒・白のフチ。跳ね返りながら拡大。
+- ツッコミ・赤スラム: 白文字＋赤・白・暗色のフチ。叩きつけて短く揺らす。
+- 見出し・スライド: 白文字＋紺・白・暗色のフチ。左から滑らせる。
 
-文字色・サイズ・傾き・登場・退場・表示中の動きを調整して「この演出をXMLに保存」で保存します。
+3案とも標準の傾きは0度。横長の「おまかせ」は下中央（1920×1080では960,900）です。位置を明示した場合はその指定を優先します。
+文字色・サイズ・登場・退場・表示中の動きを調整して「この演出をXMLに保存」で保存します。
 「演出3案のXMLを保存」は調整中の内容ではなく、元の3つの見本を0.5〜3.5秒・4.5〜7.5秒・8.5〜11.5秒に並べます。画面の縦横は現在の選択を使います。
 
-30fpsのFCP 7 XML（xmeml version 5）です。文字をText generator、動きをBasic Motion（位置・拡大率・回転）とOpacityのキーフレームで記録します。
+30fpsのFCP 7 XML（xmeml version 5）です。
+フチ付きの場合は、Premiere自身がXMLに書き出すGraphicAndTypeのSource Textデータを生成します。1クリップ内の1文字レイヤーが色・多重フチを持つため、Premiereで一度文字を書き換えれば装飾にも反映されます。フチを文字の複製で作る方式ではありません。
+フチなしの場合は従来のText generatorを使い、検証済みの読み込み経路を残します。
+動きはBasic Motion（位置・拡大率・回転）とOpacityのキーフレームです。
 CanvasとXMLは `block-motion.js` の同じ計算を使います。一定区間の中間キーだけを省き、停止開始・再開時刻を残します。
-長文を縮小した場合はRendererが実際に使った文字サイズと配置を渡します。改行は自分で入力しますが、複数行の行間はXML未対応です。
-PremiereのText変換で観察された480行基準のサイズ倍率を補正しています。フォントメトリクスや位置の変換も含め、**今回追加した色・サイズ・配置・動きの再現は現行Premiereで未確認**です。従来の文字編集・フォント確認と区別します。
+長文を縮小した場合はRendererが実際に使った文字サイズと配置を渡します。
+Source Textは文字サイズを直接指定し、Canvasのベースライン（高さsizeの0.88）と中央との差を補正します。Text generatorではPremiereの480行基準のサイズ倍率を補正します。
 
-フチ・影・背景プレート・複合パーツ・縦書き・字間・1文字ずつ・ワイプ・非等方の変形・一部だけの強調・複数行は対応していません。該当する場合は理由を表示して演出XMLの保存を止めます。既存の装飾の試作はブラウザで引き続き確認・JSON保存できます。
+Source Textのバイナリ形式は公開仕様ではありません。Premiereのバージョンを更新した場合は、取り込み・文字編集・装飾と動き・保存後の再読み込みを再確認してください。
+今回の実機確認は横長・Noto Sans JP Blackです。縦長、別書体、各動きの全フレーム一致、プロジェクトを閉じて再読み込みする操作は未確認です。
+
+影・背景プレート・複合パーツ・縦書き・字間・1文字ずつ・ワイプ・非等方の変形・一部だけの強調・複数行は対応していません。フチは単色、0〜80px、4本までです。該当する場合は理由を表示して保存を止めます。
+既存の試作のJSON・保存データは引き続き使えます。標準デザインの変更は、保存済みの個別のスタイル指定を上書きしません。
 **XMLに通常字幕・背景・画面効果・効果音は含みません。画像・MP4・MOGRTへの置き換えは行いません。**
 
 フォントは「XMLのフォント（PostScript名）」で指定します（初期値 `NotoSansJP-Black`）。PCのフォントから選ぶと実際の書体のPostScript名を入力します。フォント本体は同梱しません。
-`Yu Gothic`や`Noto Sans JP`というファミリー名ではなく、確認済みの`YuGothic-Bold`や`NotoSansJP-Black`を使います。
-Bold/Blackの書体を特定しているので、`fontstyle`はPlain（1）です。
-
-Premiereの「ファイル → 読み込み」でXMLを取り込み、以下を確認します。
-
-1. 3案がそれぞれ正しいフォント・色・サイズ・位置で表示される。
-2. 文章を書き換えられ、モーション・不透明度のキーも調整できる。
-3. 登場・静止・退場を再生し、ラボと比較する。
-4. 保存と再読み込みでも文字と動きが残る。
+`Yu Gothic`や`Noto Sans JP`というファミリー名ではなく、`YuGothic-Bold`や`NotoSansJP-Black`を使います。Text generatorの`fontstyle`はPlain（1）です。
 
 ラボはローカル専用です。公開版のPremiere ZIP出力は従来のままです。
 
 形式の根拠:
 - [AppleのText generator字幕例](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Applications/Applications.html#//apple_ref/doc/uid/TP30001156-CH6-SW2)
 - [AppleのEffect / Keyframe仕様](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Elements/Elements.html)
-- [Adobeの旧CS6資料](https://helpx.adobe.com/pdf/cs6/premiere_pro_reference.pdf) はText generatorからタイトルへの変換を記載していますが、現行版の保証にはなりません。
+- GraphicAndType / Source TextはこのPCのPremiere自身のXML書き出しと検証プロジェクトの読み書きを参照。
