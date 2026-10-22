@@ -2,18 +2,20 @@ import { resolveStyles } from "./telop.js";
 import { Renderer } from "./render.js";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
-  CUT_PRESETS, normalizeWords, buildLinesFromWords, retakeHints,
+  CUT_PRESETS, normalizeWords, alignWordTimes, buildLinesFromWords, retakeHints, timedLines,
   totalDuration, srcToOut, outToSrc, toSrt, FX, FX_POS, SCREEN, FRAME, layoutClips, splitAtClips, clipAt, assignSpeakers,
-} from "./timeline.js";
+} from "./timeline.js?v=20261022-cuts2";
 import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
 import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
 import { autoEdit, describe } from "./autoedit.js";
-import { buildPremierePackage } from "./premiere.js";
+import { buildPremierePackage } from "./premiere.js?v=20261022-cuts2";
 import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js";
-import { createProjectStore, validateProject, projectFiles, sameFiles } from "./project-store.js";
+import { createProjectStore, validateProject, projectFiles, sameFiles } from "./project-store.js?v=20261022-cuts2";
 import { modelCacheEntries, deleteModelCache, deleteOldModels } from "./model-cache.js";
 import { createEditHistory, resetSubtitles } from "./edit-history.js";
+import { clearRangeEdits, linesForOutput } from "./range-edits.js";
+import { createCutEditor } from "./cut-editor.js?v=20261022-review1";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
@@ -27,6 +29,8 @@ const state = {
   pcm: null,        // 全素材をつないだ 16kHz モノラル（文字起こし用）
   speech: [],
   lines: [],
+  rangeEdits: [],
+  captionTimes: [],
   segs: [],
   settings: defaultSettings(),
   editSpeaker: "A", // デザインパネルで編集中の話者
@@ -58,7 +62,7 @@ let editGroupId = 0;
 
 function editSnapshot() {
   const p = projectData();
-  return { settings: p.settings, lines: p.lines, words: p.words, autoEdit: p.autoEdit };
+  return { settings: p.settings, lines: p.lines, words: p.words, rangeEdits: p.rangeEdits, autoEdit: p.autoEdit };
 }
 function editorLocked() { return analysisRunning || projectTransition || historyApplying || $("deleteProjectDialog").open || document.body.classList.contains("busy"); }
 function syncEditControls() {
@@ -68,6 +72,7 @@ function syncEditControls() {
   $("btnResetSubtitles").disabled = locked || !state.lines.length;
   $("btnAuto").disabled = locked || !state.lines.length;
   $("btnAddLine").disabled = locked || !state.segs.length;
+  $("btnCutEditor").disabled = locked;
 }
 function recordEdit() {
   if (!activeSaveId || !state.clips.length || historyApplying || analysisRunning) return;
@@ -286,7 +291,7 @@ async function clipsChanged(fromAdd) {
   $("dropzone").classList.toggle("loaded", has);
   $("btnAnalyze").disabled = !has;
   if (!has) {
-    Object.assign(state, { db: null, pk: null, pcm: null, words: [], speech: [], lines: [], segs: [], items: [] });
+    Object.assign(state, { db: null, pk: null, pcm: null, words: [], speech: [], lines: [], rangeEdits: [], captionTimes: [], segs: [], items: [] });
     await renderer.setItems([]);
     renderTable();
     editHistory.reset(editSnapshot());
@@ -310,6 +315,7 @@ async function clipsChanged(fromAdd) {
   }
   state.lines = [];
   state.words = [];
+  state.rangeEdits = [];
   state.t = 0;
   editHistory.reset(editSnapshot());
   syncEditControls();
@@ -449,9 +455,9 @@ function analyze(onlySpeakers = false) {
       const dur = state.pcm.length / 16000;
       if (m.words) {
         // 1語ごとの時刻：字幕のタイミングに使い、話している所はカットしないよう保護する
-        state.words = normalizeWords(m.words, dur);
+        state.words = alignWordTimes(normalizeWords(m.words, dur), { rms: state.db, peak: state.pk || state.db }, cutOptions());
         computeSpeech();
-        state.lines = buildLinesFromWords(state.words);
+        state.lines = buildLinesFromWords(state.words, state.speech);
       } else {
         computeSpeech();
         state.lines = buildLines(m.chunks, state.speech, dur);
@@ -502,9 +508,11 @@ async function settle() {
 
 async function doRefresh(rebuildTable) {
   if (!state.clips.length) return;
-  state.segs = buildSegments(state.speech, state.lines);
+  state.segs = buildSegments(state.speech, state.lines, state.rangeEdits, state.clips);
+  const output = linesForOutput(state.lines, state.rangeEdits);
+  state.captionTimes = timedLines(output, state.segs, state.settings);
   const total = totalDuration(state.segs);
-  state.items = buildItems(state.lines, state.segs, state.settings);
+  state.items = buildItems(output, state.segs, state.settings);
   await renderer.setItems(state.items);
   state.t = Math.min(state.t, total);
   $("seek").max = total || 1;
@@ -516,6 +524,8 @@ async function doRefresh(rebuildTable) {
   $("btnDiarize").disabled = !state.lines.length;
   $("btnAuto").disabled = !state.lines.length;
   $("btnPremiere").disabled = !state.segs.length;
+  $("rangeSummary").textContent = state.rangeEdits.length ? '区間の手動調整あり。「タイムラインでカットを編集」で確認できます。' : 'タイムラインで範囲を選び、削除前に再生して確認できます。';
+  cutEditor.refresh();
   syncEditControls();
   save();
   if (!state.playing) await seekTo(state.t);
@@ -527,6 +537,8 @@ function renderTable() {
   const toOpts = (o) => Object.entries(o).map(([k, v]) => `<option value="${k}">${typeof v === "string" ? v : v.name}</option>`).join("");
   const opts = toOpts(FX), posOpts = toOpts(FX_POS), scrOpts = toOpts(SCREEN);
   const multi = state.clips.length > 1;
+  const lineStarts = new Map();
+  for (const c of state.captionTimes) if (!lineStarts.has(c.l.id)) lineStarts.set(c.l.id, c.t0);
   // 言い直しの候補（お知らせだけ。カットするかは本人が決める）
   const hints = state.words?.length ? retakeHints(state.words, (t) => clipAt(state.clips, t)) : [];
   const HINT_LABEL = { retake: "言い直し?", repeat: "繰り返し?", stall: "中断?" };
@@ -553,8 +565,9 @@ function renderTable() {
     const bt = tr.querySelector(".time button"), ta = tr.querySelector("textarea");
     const sel = tr.querySelector(".fx-type"), inp = tr.querySelector(".fx input[type=text]");
     const pos = tr.querySelector(".fx-pos select"), scr = tr.querySelector(".scr select"), cb = tr.querySelector(".cut input");
-    bt.textContent = fmt(srcToOut(state.segs, l.src[0]));
-    bt.onclick = () => seekTo(srcToOut(state.segs, l.src[0]) + 0.01);
+    const start = lineStarts.get(l.id) ?? srcToOut(state.segs, l.src[0]);
+    bt.textContent = fmt(start);
+    bt.onclick = () => seekTo(start + 0.001);
     ta.value = l.text;
     ta.oninput = () => { l.text = ta.value; scheduleRefresh(); };
     // 話者（1人だけのときは隠す）
@@ -579,7 +592,7 @@ function renderTable() {
     syncFx();
     cb.checked = l.cut;
     tr.classList.toggle("is-cut", l.cut);
-    cb.onchange = async () => { l.cut = cb.checked; await refresh(true); };
+    cb.onchange = () => setLineCut(l, cb.checked);
     // 行の半分以上が候補の範囲に入っていれば印を付ける
     const hint = hints.find((h) => Math.min(h.end, l.src[1]) - Math.max(h.start, l.src[0]) >= (l.src[1] - l.src[0]) * 0.5);
     if (hint) {
@@ -589,17 +602,26 @@ function renderTable() {
       hb.title = `${hint.reason}${hint.retained ? `
 残す方：「${hint.retained}」` : ""}
 クリックでこの行をカット／元に戻す`;
-      hb.onclick = async () => { l.cut = !l.cut; await refresh(true); };
+      hb.onclick = () => setLineCut(l, !l.cut);
       tr.querySelector(".time").appendChild(hb);
     }
     tb.appendChild(tr);
   }
 }
 
+async function setLineCut(line, cut) {
+  if (editorLocked()) return;
+  stop();
+  // 字幕のチェックを変更した場合は、その字幕内の手動調整より新しい指定を優先。
+  state.rangeEdits = clearRangeEdits(state.rangeEdits,...line.src);
+  line.cut = cut;
+  await refresh(true);
+}
+
 function highlightRow() {
-  const cur = state.items?.find((it) => it.style.startsWith("subtitle") && state.t >= it.t && state.t < it.t + it.d);
+  const cur = state.captionTimes.find(it => state.t >= it.t0 && state.t < it.end);
   for (const tr of $("lines").querySelectorAll("tbody tr[data-id]")) {
-    const on = cur && tr.dataset.id === cur.line;
+    const on = cur && tr.dataset.id === cur.l.id;
     if (on && !tr.classList.contains("current") && state.playing) tr.scrollIntoView({ block: "nearest" });
     tr.classList.toggle("current", !!on);
   }
@@ -631,9 +653,14 @@ let seekToken = 0;
 async function seekTo(t) {
   if (state.playing) stop();
   state.t = Math.max(0, Math.min(t, totalDuration(state.segs)));
-  if (!state.segs.length) return;
   const my = ++seekToken;
   updateClock();
+  if (!state.segs.length) {
+    ctx.fillStyle = '#111317'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#9aa1ad'; ctx.textAlign = 'center'; ctx.font = '32px "Noto Sans JP"';
+    ctx.fillText('残す区間がありません',canvas.width/2,canvas.height/2);
+    return;
+  }
   const { clip, local } = locate(state.t);
   await waitSeek(clip.video, local);
   if (my !== seekToken) return; // 連続シーク中は最後の1回だけ描く
@@ -657,7 +684,7 @@ function computeVoiceGain() {
   state.voiceAutoGain = Math.min(6, Math.max(0.4, 10 ** ((-20 - db) / 20)));
 }
 
-let sfxCtx, sfxNodes = [], segIdx = 0, active = null, voiceBus, sfxBus;
+let sfxCtx, sfxNodes = [], segIdx = 0, active = null, voiceBus, sfxBus, playbackRun = 0;
 function audioGraph() {
   sfxCtx ||= new AudioContext();
   if (!voiceBus) {
@@ -676,12 +703,14 @@ function audioGraph() {
 }
 
 async function play() {
+  const run = ++playbackRun;
   const total = totalDuration(state.segs);
   if (state.t >= total - 0.05) state.t = 0;
   const { seg, clip, local } = locate(state.t);
   segIdx = seg;
   active = clip.video;
   await waitSeek(active, local);
+  if (run !== playbackRun) return;
   state.playing = true;
   $("btnPlay").textContent = "❚❚";
   audioGraph();
@@ -696,12 +725,12 @@ async function play() {
     n.start(now + Math.max(0, e.t - state.t));
     sfxNodes.push(n);
   }
-  await active.play();
-  requestAnimationFrame(tick);
+  try { await active.play(); } catch { if (run === playbackRun) stop(); return; }
+  if (run === playbackRun) requestAnimationFrame(() => tick(run));
 }
 
-function tick() {
-  if (!state.playing) return;
+async function tick(run) {
+  if (!state.playing || run !== playbackRun) return;
   let s = state.segs[segIdx];
   let c = state.clips[s.clip];
   const local = active.currentTime;
@@ -710,23 +739,22 @@ function tick() {
     if (segIdx >= state.segs.length) { state.t = totalDuration(state.segs); stop(); updateClock(); return; }
     s = state.segs[segIdx];
     c = state.clips[s.clip];
-    if (c.video !== active) {
-      // 次の素材へ切り替え
-      active.pause();
-      active = c.video;
-      active.currentTime = s.start - c.offset;
-      active.play();
-    } else {
-      active.currentTime = s.start - c.offset; // 次の区間へジャンプ（ジャンプカット）
-    }
+    // 古い映像の上に次の字幕だけを先に描かないよう、シークが完了してから一緒に切り替える。
+    active.pause();
+    active = c.video;
+    await waitSeek(active, s.start - c.offset);
+    if (!state.playing || run !== playbackRun) return;
+    try { await active.play(); } catch { stop(); return; }
+    if (!state.playing || run !== playbackRun) return;
   }
   state.t = s.out + Math.max(0, Math.min(active.currentTime + c.offset, s.end) - s.start);
   renderer.draw(ctx, state.t, active, state.settings.layout);
   updateClock();
-  requestAnimationFrame(tick);
+  requestAnimationFrame(() => tick(run));
 }
 
 function stop() {
+  playbackRun++;
   state.playing = false;
   for (const c of state.clips) c.video.pause();
   $("btnPlay").textContent = "▶";
@@ -766,6 +794,7 @@ async function doExport() {
     locked.forEach((el) => (el.disabled = false));
     document.body.classList.remove("busy");
     $("expProgress").hidden = true;
+    updateSaveLocks();
     seekTo(state.t);
   }
 }
@@ -784,6 +813,7 @@ function projectData() {
     settings: state.settings,
     lines: state.lines,
     words: state.words || [], // 1語ごとの時刻 [開始, 終了, 文字]（発話保護と言い直し検知に使う）
+    rangeEdits: state.rangeEdits,
     autoEdit: { mode: $("selMode").value, strength: $("selStrength").value },
   };
 }
@@ -855,6 +885,7 @@ function applyProject(p, { keepHistory = false } = {}) {
   };
   if (!sps.some((sp) => sp.id === state.editSpeaker)) state.editSpeaker = sps[0].id;
   state.lines = p.lines || [];
+  state.rangeEdits = structuredClone(p.rangeEdits || []);
   state.words = Array.isArray(p.words) ? p.words.filter((w) => Array.isArray(w) && w.length === 3 && w.every((v, i) => (i < 2 ? Number.isFinite(v) : typeof v === "string"))) : [];
   renderSpeakerBar();
   refreshDesignPanel();
@@ -918,6 +949,40 @@ $("btnAnalyze").onclick = () => analyze(false);
 $("btnDiarize").onclick = () => analyze(true);
 $("btnPlay").onclick = () => (state.playing ? stop() : play());
 $("seek").oninput = (e) => seekTo(Number(e.target.value));
+const cutEditor = createCutEditor({
+  clips: () => state.clips, segments: () => state.segs, edits: () => state.rangeEdits,
+  lines: () => state.lines,
+  previewSegments: edits => buildSegments(state.speech,state.lines,edits,state.clips),
+  review: {
+    canvas, transport: document.querySelector('.transport'), stop,
+    position: () => {
+      const {src,seg} = outToSrc(state.segs,state.t);
+      return {src,clip:state.segs[seg]?.clip || 0};
+    },
+    start: async (src,fromStart,isCurrent) => {
+      stop();
+      await settle();
+      if (!isCurrent() || !state.segs.length) return;
+      await seekTo(fromStart ? 0 : srcToOut(state.segs,src));
+      if (isCurrent()) await play();
+    },
+  },
+  currentSource: () => state.segs.length ? outToSrc(state.segs,state.t).src : 0,
+  history: () => editHistory,
+  undo: () => historyAction(() => editHistory.undo(),'1つ前の編集に戻しました。'),
+  redo: () => historyAction(() => editHistory.redo(),'取り消した編集をやり直しました。'),
+  change: async (edits,status) => {
+    if (editorLocked()) return;
+    stop();
+    state.rangeEdits = edits;
+    await refresh(true);
+    setStatus('cutEditorStatus',status);
+  },
+});
+$("btnCutEditor").onclick = async () => {
+  if (editorLocked() || !state.clips.length) return;
+  stop(); await settle(); cutEditor.open();
+};
 $("selAspect").onchange = async (e) => {
   stop();
   state.settings.aspect = e.target.value;
@@ -971,7 +1036,7 @@ $("btnPremiere").onclick = async () => {
     setStatus("prStatus", "テロップを画像にしています…");
     const name = baseName() + (state.settings.aspect === "landscape" ? "_16x9" : "");
     const blob = await buildPremierePackage({
-      clips: state.clips, segs: state.segs, lines: state.lines, renderer, settings: state.settings, items: state.items,
+      clips: state.clips, segs: state.segs, lines: linesForOutput(state.lines, state.rangeEdits), renderer, settings: state.settings, items: state.items,
       gains: gains(), sfxEvents: renderer.sfxEvents(), sfxBuffers,
       folder: $("inpFolder").value.trim().replace(/^"|"$/g, ""), name,
       onProgress: (p) => setStatus("prStatus", `書き出し中… ${Math.round(p * 100)}%`),
@@ -984,6 +1049,7 @@ $("btnPremiere").onclick = async () => {
   } finally {
     btn.disabled = false;
     document.body.classList.remove("busy");
+    updateSaveLocks();
     seekTo(state.t);
   }
 };
@@ -1095,7 +1161,7 @@ $("inpVoice").oninput = (e) => { state.settings.audio.voice = Number(e.target.va
 $("inpSfx").oninput = (e) => { state.settings.audio.sfx = Number(e.target.value); audioChanged(); };
 $("btnSrt").onclick = async () => {
   await settle();
-  download(new Blob([toSrt(state.lines, state.segs)], { type: "text/plain" }), baseName() + ".srt");
+  download(new Blob([toSrt(linesForOutput(state.lines, state.rangeEdits), state.segs, state.settings)], { type: "text/plain" }), baseName() + ".srt");
 };
 $("btnOpenSave").onclick = () => {
   const id = $("selSave").value;
@@ -1228,7 +1294,7 @@ document.addEventListener("keydown", (e) => {
       return;
     }
   }
-  if (e.code === "Space" && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName) && state.segs.length) {
+  if (e.code === "Space" && !$("cutEditorDialog").open && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName) && state.segs.length) {
     e.preventDefault();
     state.playing ? stop() : play();
   }

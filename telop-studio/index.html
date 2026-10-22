@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Zen+Maru+Gothic:wght@500;700;900&family=Dela+Gothic+One&family=Kosugi+Maru&family=BIZ+UDPGothic:wght@400;700&family=Noto+Serif+JP:wght@700;900&family=Shippori+Mincho+B1:wght@700;800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css?v=20261022-review1">
 </head>
 <body>
 <header class="topbar">
@@ -124,6 +124,8 @@
         <small>これより長い無言だけをカットします。文字起こし後は、言葉を話している所は切りません</small>
       </label>
       <p class="summary" id="cutSummary"></p>
+      <button id="btnCutEditor" class="ghost small" type="button" disabled>タイムラインでカットを編集</button>
+      <p class="status" id="rangeSummary">カット前の動画を見ながら、切る範囲や戻す範囲を調整できます。</p>
     </div>
 
     <div class="card grow" id="step3">
@@ -216,6 +218,43 @@
     </div>
   </section>
 </main>
+<dialog id="cutEditorDialog" class="project-dialog cut-editor" aria-labelledby="cutEditorTitle">
+  <div class="cut-editor-header"><h2 id="cutEditorTitle">タイムラインでカットを編集</h2><button id="btnCloseCutEditor" class="ghost" type="button">閉じる</button></div>
+  <label class="cut-clip-label">素材<select id="selCutClip"></select></label>
+  <div class="cut-editor-grid">
+    <div>
+      <div class="cut-review-actions"><button id="btnReviewEdited" class="ghost small" type="button">▶ カット後を再生</button><button id="btnReviewFromStart" class="ghost small" type="button">先頭から再生</button><button id="btnReviewSource" class="ghost small" type="button" hidden>元動画に戻る</button></div>
+      <video id="cutSourceVideo" controls playsinline preload="metadata" aria-label="カット前の元動画"></video>
+      <div id="cutReviewPlayer" hidden aria-label="カット後の動画プレビュー"></div>
+      <p class="hint"><span id="cutSourceLabel">元動画の位置</span> <span id="cutSourceTime" class="mono"></span><span id="cutSourceNote">（字幕なし）</span></p>
+      <div class="cut-frame-actions"><button id="btnCutFrameBack" class="ghost small" type="button">1コマ前へ</button><button id="btnCutFrameNext" class="ghost small" type="button">1コマ後へ</button><button id="btnStopCutPreview" class="ghost small" type="button">停止</button></div>
+    </div>
+    <div class="cut-range-controls">
+      <p id="cutSelectionSummary" class="range-selection-summary">波形をドラッグして範囲を選択</p>
+      <button id="btnPlaySelection" class="ghost" type="button" disabled>▶ 選択範囲だけ再生</button>
+      <button id="btnPreviewCut" class="ghost" type="button" disabled>▶ 削除後のつながりを確認</button>
+      <p class="hint">削除後の確認は前後2秒ずつを再生します。確認だけでは編集は変わりません。</p>
+      <p id="cutPreviewStatus" class="status" role="status"></p>
+      <div class="cut-editor-actions"><button id="btnApplyRangeCut" class="primary" type="button" disabled>選択範囲を削除</button><button id="btnKeepRange" class="ghost" type="button" disabled>選択範囲を戻す</button></div>
+      <button id="btnNewRange" class="ghost small" type="button">選択を解除</button>
+    </div>
+  </div>
+  <div class="timeline-toolbar"><span>波形をドラッグして選択・両端をドラッグして調整</span><div><button id="btnTimelineZoomOut" class="ghost small" type="button" aria-label="タイムラインを縮小">−</button><span id="timelineZoomLabel" class="mono"></span><button id="btnTimelineZoomIn" class="ghost small" type="button" aria-label="タイムラインを拡大">＋</button><button id="btnTimelineFit" class="ghost small" type="button">全体</button></div></div>
+  <div id="cutTimelineScroll" class="cut-timeline-scroll">
+    <div id="cutTimeline" class="cut-timeline" role="group" aria-label="元動画のタイムライン">
+      <canvas id="cutWaveform" aria-label="時間目盛りと音声の波形"></canvas>
+      <div id="cutCaptionTrack" class="cut-caption-track" aria-label="字幕の位置"></div>
+      <div id="cutRemovalTrack" class="cut-removal-track" aria-label="削除する区間"></div>
+      <div id="cutTimelineSelection" class="cut-timeline-selection" hidden><button id="cutHandleStart" type="button" role="slider" aria-label="選択開始" tabindex="0"></button><button id="cutHandleEnd" type="button" role="slider" aria-label="選択終了" tabindex="0"></button></div>
+      <div id="cutPlayhead" class="cut-playhead"></div>
+    </div>
+  </div>
+  <p class="hint timeline-legend">緑：残す映像　赤：削除する区間（クリックで選択）　黄：選択中　白：再生位置　｜　目盛りをクリックするとその位置へ移動</p>
+  <details class="cut-time-details"><summary>開始・終了を数値で微調整</summary><div class="cut-time-inputs"><label>開始（元動画の秒）<input id="inpCutStart" type="number" min="0" step="0.001"></label><button id="btnMarkCutStart" class="ghost small" type="button">今の位置を開始に</button><label>終了（元動画の秒）<input id="inpCutEnd" type="number" min="0" step="0.001"></label><button id="btnMarkCutEnd" class="ghost small" type="button">今の位置を終了に</button></div></details>
+  <p id="cutEditorStatus" class="status" role="status"></p>
+  <div class="cut-editor-actions"><button id="btnUndoRange" class="ghost small" type="button">↶ 元に戻す</button><button id="btnRedoRange" class="ghost small" type="button">↷ やり直す</button></div>
+  <details class="cut-time-details"><summary>削除する区間の一覧</summary><div id="cutRangeList" class="cut-range-list"></div></details>
+</dialog>
 <dialog id="deleteProjectDialog" class="project-dialog" aria-labelledby="deleteProjectTitle" aria-describedby="deleteProjectDescription">
   <h2 id="deleteProjectTitle">プロジェクトを削除しますか？</h2>
   <p class="project-dialog-name" id="deleteProjectName"></p>
@@ -227,6 +266,6 @@
   </form>
 </dialog>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/app.js?v=20261022-review1"></script>
 </body>
 </html>
