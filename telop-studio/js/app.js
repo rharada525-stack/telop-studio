@@ -16,9 +16,11 @@ import { modelCacheEntries, deleteModelCache, deleteOldModels } from "./model-ca
 import { createEditHistory, resetSubtitles } from "./edit-history.js";
 import { clearRangeEdits, linesForOutput } from "./range-edits.js";
 import { createCutEditor } from "./cut-editor.js?v=20261022-review1";
+import { initWorkspace } from "./workspace.js?v=20261022-workspace1";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("preview");
+const workspace = initWorkspace();
 const ctx = canvas.getContext("2d");
 const LONG_WARN = 20 * 60; // これより長いと重くなる（秒）
 const DESIGN_KEY = "telop-studio:defaultDesign";
@@ -247,6 +249,7 @@ async function addFiles(files) {
   if (state.lines.length && !confirm("素材を追加すると、文字起こしと字幕の修正はやり直しになります。続けますか？")) return;
   if (state.clips.length) { await settle(); if (!save()) return; }
   stop();
+  workspace.show("step2");
   files.sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   for (const [i, file] of files.entries()) {
     const label = files.length > 1 ? `素材 ${i + 1}/${files.length}` : "素材";
@@ -260,6 +263,7 @@ async function addFiles(files) {
     }
   }
   await clipsChanged(true);
+  if (!$("anaStatus").classList.contains("error") && !$("projectStatus").classList.contains("error")) workspace.show(state.lines.length ? "step3" : "step2");
 }
 
 async function loadClip(file, status) {
@@ -535,6 +539,7 @@ function renderTable() {
   tb.innerHTML = "";
   const toOpts = (o) => Object.entries(o).map(([k, v]) => `<option value="${k}">${typeof v === "string" ? v : v.name}</option>`).join("");
   const opts = toOpts(FX), posOpts = toOpts(FX_POS), scrOpts = toOpts(SCREEN);
+  const headers = [...$("lines").querySelectorAll("th")].map(th => th.textContent);
   const multi = state.clips.length > 1;
   const lineStarts = new Map();
   for (const c of state.captionTimes) if (!lineStarts.has(c.l.id)) lineStarts.set(c.l.id, c.t0);
@@ -561,9 +566,15 @@ function renderTable() {
         <label class="fx-pos">位置 <select>${posOpts}</select></label></td>
       <td class="scr"><select>${scrOpts}</select></td>
       <td class="cut"><input type="checkbox"></td>`;
+    [...tr.cells].forEach((cell, i) => {
+      cell.dataset.label = headers[i];
+      for (const input of cell.querySelectorAll("select, textarea, input")) input.setAttribute("aria-label", headers[i]);
+    });
     const bt = tr.querySelector(".time button"), ta = tr.querySelector("textarea");
     const sel = tr.querySelector(".fx-type"), inp = tr.querySelector(".fx input[type=text]");
     const pos = tr.querySelector(".fx-pos select"), scr = tr.querySelector(".scr select"), cb = tr.querySelector(".cut input");
+    inp.setAttribute("aria-label", "空なら字幕と同じ");
+    pos.setAttribute("aria-label", "位置");
     const start = lineStarts.get(l.id) ?? srcToOut(state.segs, l.src[0]);
     bt.textContent = fmt(start);
     bt.onclick = () => seekTo(start + 0.001);
@@ -571,6 +582,7 @@ function renderTable() {
     ta.oninput = () => { l.text = ta.value; scheduleRefresh(); };
     // 話者（1人だけのときは隠す）
     const spSel = tr.querySelector(".sp-sel");
+    spSel.setAttribute("aria-label", "話者");
     for (const sp of speakers()) spSel.appendChild(Object.assign(document.createElement("option"), { value: sp.id, textContent: sp.name }));
     spSel.value = speakers().some((s) => s.id === l.speaker) ? l.speaker : speakers()[0].id;
     spSel.hidden = speakers().length <= 1;
@@ -833,6 +845,7 @@ function updateSaveLocks() {
   const locked = editorLocked();
   for (const id of ["selSave", "inpSaveName", "btnOpenSave", "btnNewSave", "btnCopySave", "btnDeleteSave"]) $(id).disabled = locked || !activeSaveId;
   $("inpProject").disabled = locked;
+  $("selAspect").disabled = locked;
   $("btnDeleteModels").disabled = locked || deletingModels || !("caches" in window);
   syncEditControls();
 }
@@ -924,6 +937,8 @@ function syncAudioUi() {
 function setStatus(id, text, error = false) {
   $(id).textContent = text;
   $(id).classList.toggle("error", error);
+  const panel = $(id).closest('[role="tabpanel"]');
+  if (error && panel) workspace.show(panel.id);
 }
 function showProgress(id, p) {
   const el = $(id);
@@ -982,6 +997,7 @@ $("btnCutEditor").onclick = async () => {
   stop(); await settle(); cutEditor.open();
 };
 $("selAspect").onchange = async (e) => {
+  if (editorLocked()) { e.target.value = state.settings.aspect; return; }
   stop();
   state.settings.aspect = e.target.value;
   applyFormat();
