@@ -10,7 +10,7 @@ import { openMedia, decodeAudioTrack } from "./decode.js";
 import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
 import { autoEdit, describe } from "./autoedit.js";
 import { buildPremierePackage } from "./premiere.js?v=20261022-cuts2";
-import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js";
+import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js?v=20261022-copy1";
 import { createProjectStore, validateProject, projectFiles, sameFiles } from "./project-store.js?v=20261022-cuts2";
 import { modelCacheEntries, deleteModelCache, deleteOldModels } from "./model-cache.js";
 import { createEditHistory, resetSubtitles } from "./edit-history.js";
@@ -524,7 +524,6 @@ async function doRefresh(rebuildTable) {
   $("btnDiarize").disabled = !state.lines.length;
   $("btnAuto").disabled = !state.lines.length;
   $("btnPremiere").disabled = !state.segs.length;
-  $("rangeSummary").textContent = state.rangeEdits.length ? '区間の手動調整あり。「タイムラインでカットを編集」で確認できます。' : 'タイムラインで範囲を選び、削除前に再生して確認できます。';
   cutEditor.refresh();
   syncEditControls();
   save();
@@ -892,7 +891,6 @@ function applyProject(p, { keepHistory = false } = {}) {
   $("inpTitle").value = state.settings.title;
   $("chkHighlight").checked = state.settings.autoHighlight !== false;
   $("selSet").value = state.settings.designSet || "standard";
-  $("setNote").textContent = DESIGN_SETS[$("selSet").value]?.note || "";
   $("selLayout").value = state.settings.layout;
   syncCutUi();
   renderer.restyle();
@@ -1094,10 +1092,8 @@ $("selSet").onchange = (e) => {
   state.settings.designSet = key;
   state.settings.fxMap = { ...set.fxMap };
   if (set.autoMode) { $("selMode").value = set.autoMode; $("selMode").dataset.touched = "1"; }
-  $("setNote").textContent = set.note;
   speakersChanged();
 };
-$("setNote").textContent = DESIGN_SETS.standard.note;
 $("chkHighlight").onchange = (e) => { state.settings.autoHighlight = e.target.checked; refresh(false); };
 $("btnUndoEdit").onclick = () => historyAction(() => editHistory.undo(), "1つ前の編集に戻しました。");
 $("btnRedoEdit").onclick = () => historyAction(() => editHistory.redo(), "取り消した編集をやり直しました。");

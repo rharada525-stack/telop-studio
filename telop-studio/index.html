@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Zen+Maru+Gothic:wght@500;700;900&family=Dela+Gothic+One&family=Kosugi+Maru&family=BIZ+UDPGothic:wght@400;700&family=Noto+Serif+JP:wght@700;900&family=Shippori+Mincho+B1:wght@700;800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=20261022-review1">
+<link rel="stylesheet" href="css/app.css?v=20261022-copy1">
 </head>
 <body>
 <header class="topbar">
@@ -42,7 +42,6 @@
       <ol id="clipList" class="clip-list" hidden></ol>
       <section class="save-manager" id="saveManager" aria-label="プロジェクト" hidden>
         <h3>この動画のプロジェクト</h3>
-        <p class="hint">編集中のプロジェクトに自動保存します。新しく始めても、前のプロジェクトは残ります。</p>
         <div class="row">
           <label>プロジェクトを選ぶ<select id="selSave"></select></label>
           <button id="btnOpenSave" class="ghost" type="button">続きから開く</button>
@@ -54,7 +53,6 @@
           <button id="btnCopySave" class="ghost" type="button">プロジェクトを複製</button>
         </div>
         <p class="status" id="projectStatus" role="status"></p>
-        <p class="hint save-note">動画本体は保存しません。次回は同じ動画を読み込んで再開できます。別のPCへの移動やバックアップには「JSONに保存」を使ってください。</p>
       </section>
       <div class="source-settings">
         <label>出力の形
@@ -72,12 +70,11 @@
         </label>
         <div class="design-set-field">
           <label for="selSet">テロップのデザインセット</label>
-          <select id="selSet" aria-describedby="setNote">
-            <option value="standard">標準（テレビ風）</option>
+          <select id="selSet">
+            <option value="standard">標準</option>
             <option value="entertainment">エンタメ切り抜き風（ショート向け）</option>
             <option value="business">ビジネス講義風（長尺向け）</option>
           </select>
-          <p id="setNote" class="set-note"></p>
         </div>
         <label class="title-field">タイトル帯（空なら出さない）
           <input id="inpTitle" type="text" placeholder="例：コンビニコーヒー裏ワザ">
@@ -100,8 +97,7 @@
       <p class="hint" id="modelHelp">まずは高精度でお試しください。動作が重い・解析に失敗する場合は、低スペックモードで解析し直せます（精度は下がります）。</p>
       <details class="model-storage" id="modelStorage">
         <summary>ダウンロード済みAIモデルの管理</summary>
-        <p class="hint">モデルは、このサイトを開いたブラウザ内に保存されます。削除後は、次の解析で必要なモデルを再ダウンロードします。プロジェクトや元の動画は残ります。</p>
-        <button id="btnDeleteModels" class="ghost" type="button">このツールのAIモデルを削除</button>
+        <button id="btnDeleteModels" class="ghost" type="button">使わないAIモデルを削除</button>
         <p class="status" id="modelStatus" role="status"></p>
       </details>
       <div class="row speaker-opt">
@@ -121,11 +117,9 @@
       </div>
       <label class="slider">カットする無言の長さ <span id="gapVal" class="mono">0.60秒</span>
         <input id="inpGap" type="range" min="0.2" max="3.0" step="0.05" value="0.6">
-        <small>これより長い無言だけをカットします。文字起こし後は、言葉を話している所は切りません</small>
       </label>
       <p class="summary" id="cutSummary"></p>
       <button id="btnCutEditor" class="ghost small" type="button" disabled>タイムラインでカットを編集</button>
-      <p class="status" id="rangeSummary">カット前の動画を見ながら、切る範囲や戻す範囲を調整できます。</p>
     </div>
 
     <div class="card grow" id="step3">
@@ -135,7 +129,6 @@
         <button id="btnRedoEdit" class="ghost" type="button" title="やり直す（Ctrl+Shift+Z / Ctrl+Y / ⌘⇧Z）" disabled>↷ やり直す</button>
         <button id="btnResetSubtitles" class="ghost" type="button" disabled>字幕をすべて初期化</button>
       </div>
-      <p class="hint">初期化は文章・時間・話者を残し、全員のデザイン・演出・画面効果・カット指定を元に戻します。初期化も取り消せます。</p>
       <p class="status edit-status" id="editStatus" role="status"></p>
       <div class="auto-bar">
         <button id="btnAuto" class="auto-btn" type="button" disabled>✨ おまかせ編集</button>
@@ -167,13 +160,11 @@
 
     <details class="card" id="stepDesign">
       <summary><h2><span class="num">4</span>字幕のデザイン</h2><span class="hint">クリックで開く</span></summary>
-      <p class="hint">Premiere のエッセンシャルグラフィックスと同じ考え方で、数値で指定できます。マニュアルの指定に合わせて入力し、「デザインを保存」したファイルを配れば、全員が同じデザインで作れます。</p>
       <div class="speaker-bar">
         <div id="speakerBar" class="sp-tabs"></div>
         <label class="sp-name">名前 <input id="inpSpeakerName" type="text" maxlength="20"></label>
         <button id="btnSpeakerDelete" class="ghost small" type="button">この話者を削除</button>
       </div>
-      <p class="hint">話者ごとに別のデザインにできます。上で話者を選んでから下の項目を変えてください。</p>
       <div id="designPanel" class="design-panel"></div>
       <div class="row design-actions">
         <button id="btnDesignSave" class="ghost small" type="button">この話者のデザインを保存</button>
@@ -207,7 +198,6 @@
 
       <div class="premiere-box">
         <h3>Premiere Pro で仕上げる</h3>
-        <p class="hint">カット・テロップ・効果音を並べた状態の編集データ（XML）を、画像や効果音と一緒に ZIP で書き出します。</p>
         <label class="folder">元の動画が入っているフォルダ（あると便利）
           <input id="inpFolder" type="text" placeholder="例：C:\Users\名前\Videos\撮影1">
           <small>エクスプローラーでそのフォルダを開き、上のアドレス欄をコピーして貼り付けます。空のままでも、Premiere で開くときに場所を選べば使えます。</small>
@@ -266,6 +256,6 @@
   </form>
 </dialog>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
-<script type="module" src="js/app.js?v=20261022-review1"></script>
+<script type="module" src="js/app.js?v=20261022-copy1"></script>
 </body>
 </html>
