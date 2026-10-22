@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildTextXml, plainText, xmlStyleWarnings, motionSamples } from '../admin/effects-lab/text-xml.mjs';
-import { NATIVE_PRESETS, XML_PRESETS, DESIGN_VARIANTS, nativeStyles } from '../admin/effects-lab/native-presets.mjs';
-import { EFFECTS, sceneFor, newDraft, SAMPLES, designStyle } from '../admin/effects-lab/model.mjs';
+import { NATIVE_PRESETS, XML_PRESETS, DESIGN_VARIANTS, FONT_CHOICES, nativeStyles } from '../admin/effects-lab/native-presets.mjs';
+import { EFFECTS, sceneFor, newDraft, SAMPLES, designStyle, selectDesign, fontForStyle } from '../admin/effects-lab/model.mjs';
 
 test('新旧の演出をラボ内の試作として残し、本体の演出に追加しない', () => {
   for (const [id, preset] of Object.entries(NATIVE_PRESETS)) for (const aspect of ['portrait', 'landscape']) {
@@ -80,7 +80,47 @@ function sourceData(xml) {
   const runs = ref(paragraph[0]), part = table(ref(runs + 4)), character = table(ref(part[1]));
   const fonts = ref(paragraph[1]);
   const rgb = p => { const t = table(ref(p)); return [0, 1, 2].map(k => bytes.readUInt32LE(t[k])); };
-  return { bytes, table, ref, character, paragraph, text: string(ref(part[0])), font: string(ref(fonts + 4)), rgb };
+  return { bytes, table, ref, character, paragraph, runCount: bytes.readUInt32LE(runs), fontCount: bytes.readUInt32LE(fonts),
+    text: string(ref(part[0])), font: string(ref(fonts + 4)), rgb };
+}
+
+function assertPaint(d, fields, colorKey, modeKey, gradientKey, expected) {
+  const rgb = color => color.slice(1).match(/../g).map(n => parseInt(n, 16));
+  const gradient = typeof expected !== 'string';
+  assert.equal(d.bytes.readUInt32LE(fields[modeKey]), Number(gradient));
+  assert.deepEqual(d.rgb(fields[colorKey]), rgb(gradient ? expected.stops[0] : expected));
+  if (!gradient) { assert.equal(fields[gradientKey], undefined); return; }
+  const g = d.table(d.ref(fields[gradientKey])), stops = d.ref(g[1]);
+  assert.equal(d.bytes.readFloatLE(g[0]), 90, '縦グラデーションの向きを保持する');
+  assert.equal(d.bytes.readUInt32LE(stops), expected.stops.length);
+  expected.stops.forEach((color, i) => {
+    const stop = d.table(d.ref(stops + 4 + i * 4));
+    assert.deepEqual(d.rgb(stop[0]), rgb(color));
+    assert.ok(Math.abs(d.bytes.readFloatLE(stop[1]) - i / (expected.stops.length - 1)) < 1e-6);
+  });
+}
+
+function assertEditableStyle(d, style, fontName, text) {
+  assert.equal(d.runCount, 1, '装飾ごとに文字を複製しない');
+  assert.equal(d.fontCount, 1); assert.equal(d.font, fontName); assert.equal(d.text, text);
+  assert.equal(d.bytes.readFloatLE(d.character[1]), style.size);
+  assert.equal(d.bytes.readUInt32LE(d.character[3]), 1, '文字の塗りが有効');
+  assertPaint(d, d.character, 2, 20, 21, style.fill);
+  assert.equal(d.bytes.readUInt32LE(d.character[5]), Number(!!style.strokes.length));
+  if (style.strokes.length) {
+    assert.equal(d.bytes.readFloatLE(d.character[6]), style.strokes[0].w);
+    assert.equal(d.bytes.readUInt32LE(d.character[24]), 2);
+    assertPaint(d, d.character, 4, 22, 23, style.strokes[0].color);
+  }
+  const strokes = d.ref(d.character[17]);
+  assert.equal(d.bytes.readUInt32LE(strokes), Math.max(0, style.strokes.length - 1));
+  style.strokes.slice(1).forEach((stroke, i) => {
+    const fields = d.table(d.ref(strokes + 4 + i * 4));
+    assert.equal(d.bytes.readUInt32LE(fields[1]), 1);
+    assert.equal(d.bytes.readFloatLE(fields[2]), stroke.w);
+    assert.equal(d.bytes.readUInt32LE(fields[5]), 2);
+    assertPaint(d, fields, 0, 3, 4, stroke.color);
+  });
 }
 
 test('フチ付き3案は1クリップ1文字レイヤーと編集可能なフチ・Motion/Opacityを持つ', () => {
@@ -152,19 +192,51 @@ test('デザインの塗り・フチの未対応グラデーション指定を�
   }
 });
 
-test('全デザインと全演出の組み合わせを下配置の編集可能な文字XMLで渡せる', () => {
-  for (const fx of Object.keys(XML_PRESETS)) for (const design of Object.keys(DESIGN_VARIANTS)) {
-    const draft = { ...newDraft(), fx, design, text: '編集できるテロップ' };
-    const style = designStyle(draft);
-    const xml = buildTextXml({ items: [{ text: draft.text, t: .5, d: 3, style }], fontName: draft.font.postscriptName });
-    const d = sourceData(xml);
-    assert.equal(d.text, draft.text); assert.equal(d.font, draft.font.postscriptName);
-    assert.equal(d.bytes.readUInt32LE(d.character[20]), design === 'classic' ? 0 : 1);
-    assert.deepEqual(style.pos, [960, 900]); assert.equal(style.rotate || 0, 0);
+test('17デザインと8演出で書体・サイズ・単色/グラデーション・1〜4本のフチを編集可能な文字へ渡す', () => {
+  assert.equal(Object.keys(DESIGN_VARIANTS).length, 17);
+  assert.equal(Object.keys(XML_PRESETS).length, 8);
+  for (const aspect of ['portrait', 'landscape']) for (const fx of Object.keys(XML_PRESETS)) for (const [id, variant] of Object.entries(DESIGN_VARIANTS)) {
+    const initial = { ...newDraft(), fx, aspect, text: '編集できるテロップ' };
+    const draft = selectDesign(initial, id), style = designStyle(draft);
+    const expectedFont = variant.fontChoice ? FONT_CHOICES[variant.fontChoice] : initial.font;
+    const font = fontForStyle(draft, style);
+    assert.equal(font.postscriptName, expectedFont.postscriptName);
+    assert.equal(style.family, expectedFont.family); assert.equal(style.weight, expectedFont.weight);
+    assert.equal(style.size, variant.aspectStyle?.[aspect]?.size ?? nativeStyles(aspect)[fx].size);
+    assert.deepEqual(style.fill, variant.style.fill); assert.deepEqual(style.strokes, variant.style.strokes);
+    assert.deepEqual(xmlStyleWarnings(style, draft.text), []);
+    const [W, H] = aspect === 'landscape' ? [1920, 1080] : [1080, 1920];
+    const xml = buildTextXml({ W, H, items: [{ text: draft.text, t: .5, d: 3, style, fontName: font.postscriptName }], fontName: 'FallbackFont-Regular' });
+    assertEditableStyle(sourceData(xml), style, expectedFont.postscriptName, draft.text);
+    if (aspect === 'landscape') assert.deepEqual(style.pos, [960, 900]);
+    assert.equal(style.rotate || 0, 0);
     assert.equal((xml.match(/<clipitem /g) || []).length, 1);
+    assert.equal((xml.match(/<name>Source Text<\/name>/g) || []).length, 1);
     assert.match(xml, /<effectid>basic<\/effectid>/);
-    assert.doesNotMatch(xml, /<pathurl>|\.png|\.mp4|\.mogrt/);
+    assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
   }
+});
+
+test('用途別の書体が混在する全17案バッチで各クリップのPostScript名・装飾・時間を保持する', () => {
+  const snapshot = { ...newDraft(), fx: 'xml_reaction', text: '同じ文章で比べます', duration: 2.5 };
+  const items = Object.keys(DESIGN_VARIANTS).map((id, i) => {
+    const draft = selectDesign(snapshot, id), style = designStyle(draft);
+    return { text: draft.text, t: i * (snapshot.duration + 1) + .5, d: snapshot.duration, style, fontName: fontForStyle(draft, style).postscriptName };
+  });
+  assert.equal(items.length, 17);
+  assert.equal(new Set(items.map(item => item.fontName)).size, 5, '推奨の5書体を混在させる');
+  const before = JSON.stringify(items);
+  const xml = buildTextXml({ name: '全デザイン17案', items, fontName: 'FallbackFont-Regular' });
+  const clips = [...xml.matchAll(/<clipitem\b[\s\S]*?<\/clipitem>/g)].map(match => match[0]);
+  assert.equal(clips.length, items.length);
+  clips.forEach((clip, i) => {
+    const item = items[i];
+    assertEditableStyle(sourceData(clip), item.style, item.fontName, item.text);
+    assert.equal((clip.match(/<name>Source Text<\/name>/g) || []).length, 1);
+    assert.match(clip, new RegExp(`<start>${Math.round(item.t * 30)}</start><end>${Math.round((item.t + item.d) * 30)}</end>`));
+  });
+  assert.equal(JSON.stringify(items), before);
+  assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
 });
 
 test('横長のおまかせ位置は全案とも下中央、3案の標準の傾きは0度', () => {

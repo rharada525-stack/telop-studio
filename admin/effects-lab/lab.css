@@ -29,3 +29,5 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px}details p{font-
 @media(max-width:1300px){.design-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.viewer{position:static}}
 @media(max-width:1100px){.viewer canvas#preview,.viewer canvas#original{max-height:500px}.design-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:750px){.design-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.design-categories{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.design-categories button{font-size:11px;padding:6px 11px}.design-categories button[aria-pressed=true]{border-color:var(--accent);background:#ff476615;color:var(--text)}.design-grid.purpose-designs{grid-template-columns:repeat(3,minmax(0,1fr))}.design-card small{display:block;font-size:10px;line-height:1.5;margin-top:3px;font-weight:400;white-space:normal}.design-grid.purpose-designs .design-card{padding:8px}.design-grid.purpose-designs .design-card span{font-weight:700;color:var(--text)}
+@media(max-width:750px){.design-grid.purpose-designs{grid-template-columns:1fr}.design-grid.purpose-designs .design-card canvas{max-width:280px}}

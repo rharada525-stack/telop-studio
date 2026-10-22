@@ -2,7 +2,7 @@
 import { FX, buildItems } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS, setDesign } from '../../telop-studio/js/sets.js';
 import { designToStyle } from '../../telop-studio/js/design.js';
-import { NATIVE_PRESETS, DESIGN_VARIANTS, DEFAULT_FONT, FONT_CHOICES, nativeStyles } from './native-presets.mjs?v=20261023-rich1';
+import { NATIVE_PRESETS, DESIGN_VARIANTS, DEFAULT_FONT, FONT_CHOICES, nativeStyles, variantStyle } from './native-presets.mjs?v=20261023-purpose1';
 export const EFFECTS = { ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, { name: preset.name, style: id }])), ...FX };
 
 export const STORAGE_KEY = 'telop-studio:effects-lab:v1';
@@ -107,18 +107,23 @@ export function validateFont(font) {
 export function designStyle(draft, aspect = draft.aspect, changed = true) {
   const preset = nativeStyles(aspect)[draft.fx];
   if (!preset) return null;
-  const variant = DESIGN_VARIANTS[draft.design]?.style || {};
+  const variant = variantStyle(draft.design, aspect);
   const font = draft.font ? { family: draft.font.family, weight: draft.font.weight } : {};
   return { ...preset, ...structuredClone(variant), ...(changed ? draft.overrides?.[aspect]?.[draft.fx] || {} : {}), ...font };
 }
 
 export function selectDesign(draft, id) {
   if (!Object.hasOwn(DESIGN_VARIANTS, id)) throw new Error('不明なデザインです。');
+  const variant = DESIGN_VARIANTS[id], previous = DESIGN_VARIANTS[draft.design];
   const next = structuredClone(draft); next.design = id;
+  // 用途案には推奨の文字組みがある。前案の手調整が新案を隠さないようにする。
+  const resetLayout = !!(variant.aspectStyle || previous?.aspectStyle);
+  const clear = [...paintKeys, ...(resetLayout ? ['size', 'max_width', 'max_height', 'tracking', 'line_spacing'] : []), ...(variant.fontChoice ? ['font', 'family', 'weight'] : [])];
   for (const aspect of ['portrait', 'landscape']) {
     const style = next.overrides[aspect][draft.fx];
-    if (style) for (const key of paintKeys) delete style[key];
+    if (style) for (const key of clear) delete style[key];
   }
+  if (variant.fontChoice) next.font = validateFont(FONT_CHOICES[variant.fontChoice]);
   return next;
 }
 

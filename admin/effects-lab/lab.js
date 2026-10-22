@@ -2,9 +2,9 @@ import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-effect
 import { resolveStyles, makeItem } from '../../telop-studio/js/telop.js?v=20261022-effects2';
 import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, validateDefaults, fontForStyle } from './model.mjs?v=20261023-rich1';
-import { XML_PRESETS, DESIGN_VARIANTS, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-rich1';
-import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-rich1';
+import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, validateDefaults, fontForStyle } from './model.mjs?v=20261023-purpose1';
+import { XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-purpose1';
+import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-purpose1';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
 
@@ -20,6 +20,7 @@ let audioContext, audioNodes = [], audioGeneration = 0;
 let exporting = false;
 const dirtyFields = new Set();
 let styleDirty = false, defaults = {}, cardGeneration = 0, cardsKey = "";
+let designCategory = '', lastDesign = '';
 const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d' };
 const audioBuffers = new Map();
 const contexts = { original: $('original').getContext('2d'), preview: $('preview').getContext('2d') };
@@ -67,11 +68,17 @@ async function init() {
   $('search').oninput = () => {
     for (const button of $('effects').children) button.hidden = !button.textContent.includes($('search').value.trim());
   };
+  for (const [id, name] of Object.entries({ ...DESIGN_CATEGORIES, all: 'すべて' })) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'ghost'; button.dataset.category = id;
+    button.textContent = name; button.onclick = () => { designCategory = id; syncDesignFilter(); };
+    $('designCategories').append(button);
+  }
   for (const [id, design] of Object.entries(DESIGN_VARIANTS)) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'design-card'; button.dataset.design = id;
     button.setAttribute('aria-label', `${design.name}・${design.tag}`);
     const canvas = document.createElement('canvas'); canvas.width = 560; canvas.height = 140; canvas.setAttribute('aria-hidden', 'true');
-    const name = document.createElement('span'); name.textContent = design.name; button.append(canvas, name);
+    const name = document.createElement('span'); name.textContent = design.name;
+    const detail = document.createElement('small'); detail.textContent = design.tag; button.append(canvas, name, detail);
     button.onclick = () => { clearTimeout(timer); setDraft(selectDesign(readControls(), id)); };
     $('designs').append(button);
   }
@@ -215,7 +222,7 @@ function bind() {
   };
   for (const button of document.querySelectorAll('[data-sample]')) button.onclick = () => {
     const sample = button.dataset.sample;
-    const text = { short: 'ここが{大事}', long: 'これだけは覚えておきたい{大切なポイント}を詳しくお伝えします', lines: '{大切なのは}\n伝わるデザイン', default: SAMPLES[draft.fx] }[sample];
+    const text = { short: 'ここが{大事}', long: 'これだけは覚えておきたい{大切なポイント}を詳しくお伝えします', lines: '{大切なのは}\n伝わるデザイン', default: XML_PRESETS[draft.fx] && DESIGN_VARIANTS[draft.design]?.sample || SAMPLES[draft.fx] }[sample];
     const next = readControls(); next.text = text; setDraft(next, true);
   };
   $('compare').onchange = () => { $('originalFigure').hidden = !$('compare').checked; $('screens').classList.toggle('compare', $('compare').checked); draw(); };
@@ -309,6 +316,7 @@ function bind() {
 async function exportNative(batch) {
   if (exporting) return;
   exporting = true;
+  const batchDesignIds = visibleDesignIds(), batchCategory = designCategory;
   try {
     if (!await setDraft(readControls())) return;
     const W = prototype.W, H = prototype.H, snapshot = structuredClone(draft), snapshotStyle = scene.style;
@@ -333,14 +341,17 @@ async function exportNative(batch) {
       }
     } else if (batch === 'designs') {
       items = [];
-      for (const id of Object.keys(DESIGN_VARIANTS)) {
+      for (const id of batchDesignIds) {
         const next = selectDesign(snapshot, id); const result = await prepare(next);
-        items.push({ ...renderedItem(result.changed, result.setup.style), t: items.length * (snapshot.duration + 1) + .5 });
+        const itemFont = fontForStyle(next, result.changed.styles[result.setup.style]);
+        if (!itemFont) throw new Error('書体を選び直してください。');
+        items.push({ ...renderedItem(result.changed, result.setup.style), fontName: itemFont.postscriptName, t: items.length * (snapshot.duration + 1) + .5 });
       }
     } else items = [renderedItem(prototype, snapshotStyle)];
-    const name = batch === 'motions' ? '演出ラボ_動き8案' : batch === 'designs' ? '演出ラボ_デザイン8案' : `演出ラボ_${snapshot.name.replace(/[\\/:*?"<>|]/g, '_')}`;
+    const name = batch === 'motions' ? `演出ラボ_動き${Object.keys(XML_PRESETS).length}案` : batch === 'designs' ? `演出ラボ_${DESIGN_CATEGORIES[batchCategory] || '全デザイン'}${items.length}案` : `演出ラボ_${snapshot.name.replace(/[\\/:*?"<>|]/g, '_')}`;
     const xml = buildTextXml({ name, W, H, items, fontName });
-    download(new Blob([xml], { type: 'application/xml;charset=utf-8' }), `${name}_${fontName.replace(/[\\/:*?"<>|]/g, '_')}.xml`);
+    const fontLabel = batch === 'designs' && items.some(item => item.fontName !== fontName) ? 'デザイン別書体' : fontName;
+    download(new Blob([xml], { type: 'application/xml;charset=utf-8' }), `${name}_${fontLabel.replace(/[\\/:*?"<>|]/g, '_')}.xml`);
     status('演出XMLを保存しました。Premiereの「ファイル → 読み込み」で開き、文字・フチ・動きを調整できます。');
   } catch (error) { status(`Premiere用データを保存できません: ${error.message}`, true); }
   finally { exporting = false; setPreparing(preparing); if (prototype && !preparing) { updateXmlControls(); syncDesigns(); } }
@@ -364,17 +375,30 @@ function syncDesigns() {
   $('fontFamily').value = font.family; $('xmlFont').value = font.postscriptName;
   $('fontChoice').value = Object.entries(FONT_CHOICES).find(([, f]) => f.postscriptName === font.postscriptName)?.[0] || 'custom';
   $('designName').textContent = DESIGN_VARIANTS[draft.design]?.name || '元のデザイン';
+  if (!designCategory || lastDesign !== draft.design && designCategory !== 'all') designCategory = DESIGN_VARIANTS[draft.design]?.category || 'common';
+  lastDesign = draft.design; syncDesignFilter();
   for (const button of $('designs').children) button.setAttribute('aria-pressed', String(button.dataset.design === draft.design));
   const preferred = defaults[draft.fx];
   $('defaultStatus').textContent = preferred ? `標準：${DESIGN_VARIANTS[preferred.design]?.name || 'カスタム'} / ${preferred.font?.family || '元の書体'}` : '標準は未指定（このPCのラボだけに保存）';
   if (native) renderDesignCards(font).catch(error => status(`デザイン見本を表示できません: ${error.message}`, true));
 }
+function visibleDesignIds() {
+  return Object.keys(DESIGN_VARIANTS).filter(id => designCategory === 'all' || (DESIGN_VARIANTS[id].category || 'common') === designCategory);
+}
+function syncDesignFilter() {
+  const visible = new Set(visibleDesignIds());
+  for (const button of $('designCategories').children) button.setAttribute('aria-pressed', String(button.dataset.category === designCategory));
+  for (const button of $('designs').children) button.hidden = !visible.has(button.dataset.design);
+  $('designs').classList.toggle('purpose-designs', visible.size === 3);
+  $('designBatch').textContent = `この動き × ${DESIGN_CATEGORIES[designCategory] || '全デザイン'}${visible.size}案のXML`;
+}
 async function renderDesignCards(font) {
   const request = ++cardGeneration;
   const key = JSON.stringify(font); if (key === cardsKey) return;
   await Promise.all([...$('designs').children].map(async button => {
-    const style = { ...nativeStyles('landscape').xml_pop, ...structuredClone(DESIGN_VARIANTS[button.dataset.design].style),
-      family: font.family, weight: font.weight, size: 52, max_width: 515, pos: [280, 70], in: 'none', out: 'none', out_d: 0 };
+    const sample = selectDesign({ ...newDraft(), font }, button.dataset.design);
+    const selected = designStyle(sample, 'landscape');
+    const style = { ...selected, size: selected.size * .47, max_width: Math.min(515, selected.max_width * .47), pos: [280, 70], in: 'none', out: 'none', out_d: 0 };
     style.strokes = style.strokes.map(stroke => ({ ...stroke, w: stroke.w * .47 }));
     const item = await makeItem({ text: '伝わるテロップ', style: 'sample', t: 0, d: 3 }, { sample: style }, 560, 140, FPS);
     if (request !== cardGeneration) return;

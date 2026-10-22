@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { FX } from '../telop-studio/js/timeline.js';
 import { SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, STORAGE_KEY, DEFAULTS_KEY, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, validateDefaults, fontForStyle } from '../admin/effects-lab/model.mjs';
-import { nativeStyles, XML_PRESETS, DESIGN_VARIANTS, FONT_CHOICES } from '../admin/effects-lab/native-presets.mjs';
+import { nativeStyles, XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, variantStyle } from '../admin/effects-lab/native-presets.mjs';
 
 const raw = JSON.parse(await readFile(new URL('../telop-studio/styles.json', import.meta.url)));
 const names = [...Object.keys(raw).filter(key => !key.startsWith('_')), ...Object.keys(nativeStyles('portrait'))];
@@ -45,8 +45,8 @@ test('ラボはPagesの公開対象の外にあり、本体画面には入口が
 });
 
 
-test('8つの動きと8つのデザインを独立して組み合わせても横長の下配置を維持する', () => {
-  assert.equal(Object.keys(XML_PRESETS).length, 8); assert.equal(Object.keys(DESIGN_VARIANTS).length, 8);
+test('8つの動きと17のデザインを独立して組み合わせても横長の下配置を維持する', () => {
+  assert.equal(Object.keys(XML_PRESETS).length, 8); assert.equal(Object.keys(DESIGN_VARIANTS).length, 17);
   const motions = new Set();
   for (const [fx, preset] of Object.entries(XML_PRESETS)) for (const design of Object.keys(DESIGN_VARIANTS)) {
     const draft = { ...newDraft(), fx, text: preset.sample, design };
@@ -120,4 +120,96 @@ test('標準デザインJSONに未知の演出や動き指定を混ぜられな�
   }
   assert.throws(() => validateDefaults(newDraft(), names));
   assert.throws(() => validateDraft({ ...newDraft(), design: 'unknown' }, names));
+});
+
+
+test('用途別9案は色以外の文字組みも異なり、対応する書体と縦横の推奨サイズを持つ', () => {
+  assert.deepEqual(DESIGN_CATEGORIES, { reaction: 'ツッコミ', heading: '見出し', ending: '締め', common: '共通' });
+  const groups = Object.groupBy(Object.entries(DESIGN_VARIANTS), ([, design]) => design.category);
+  assert.equal(groups.common.length, 8);
+  for (const category of ['reaction', 'heading', 'ending']) {
+    const designs = groups[category]; assert.equal(designs.length, 3);
+    const shapes = new Set();
+    for (const [id, design] of designs) {
+      assert.ok(FONT_CHOICES[design.fontChoice]);
+      shapes.add(JSON.stringify([design.fontChoice, design.aspectStyle.landscape.size, design.style.strokes.map(s => s.w)]));
+      for (const aspect of ['portrait', 'landscape']) {
+        const draft = selectDesign({ ...newDraft(), aspect, fx: 'xml_drop' }, id);
+        const style = designStyle(draft);
+        assert.equal(style.size, design.aspectStyle[aspect].size);
+        assert.equal(style.max_width, design.aspectStyle[aspect].max_width);
+        assert.equal(style.family, FONT_CHOICES[design.fontChoice].family);
+        assert.equal(fontForStyle(draft, style).postscriptName, FONT_CHOICES[design.fontChoice].postscriptName);
+        assert.ok(style.strokes.length >= 1 && style.strokes.length <= 4);
+        assert.equal(style.in, nativeStyles(aspect).xml_drop.in);
+        assert.equal(style.rotate || 0, 0);
+        if (aspect === 'landscape') assert.deepEqual(sceneFor(draft).items[0].pos, [960, 900]);
+      }
+    }
+    assert.equal(shapes.size, 3, `${category}の3案は色替えだけではない`);
+  }
+});
+
+test('用途案の切替で前案のサイズや書体上書きを持ち越さず、動きと編集内容を保持する', () => {
+  const original = { ...newDraft(), text: '自分の締めの言葉', duration: 4.7, position: 'tr' };
+  const initial = selectFont(selectDesign(original, 'reaction_punch'), FONT_CHOICES.yu_bold);
+  for (const aspect of ['portrait', 'landscape']) initial.overrides[aspect].xml_pop = {
+    size: 230, max_width: 300, max_height: 420, tracking: .1, line_spacing: 1.8,
+    family: 'Yu Gothic', weight: 700, font: '古い指定.otf', fill: '#123456',
+    in: 'bounce', out: 'shrink', out_d: .4, idle: 'float', rotate: 0, pos: [500, 800],
+  };
+  const before = JSON.stringify(initial), next = selectDesign(initial, 'ending_thanks');
+  assert.equal(JSON.stringify(initial), before);
+  assert.equal(next.text, original.text); assert.equal(next.duration, 4.7); assert.equal(next.position, 'tr');
+  for (const aspect of ['portrait', 'landscape']) {
+    const style = designStyle(next, aspect);
+    assert.equal(style.size, DESIGN_VARIANTS.ending_thanks.aspectStyle[aspect].size);
+    assert.equal(style.max_width, DESIGN_VARIANTS.ending_thanks.aspectStyle[aspect].max_width);
+    assert.equal(style.family, 'Yu Mincho'); assert.equal(style.weight, 600);
+    assert.equal(style.tracking, undefined); assert.equal(style.max_height, undefined);
+    assert.deepEqual(next.overrides[aspect].xml_pop, { in: 'bounce', out: 'shrink', out_d: .4, idle: 'float', rotate: 0, pos: [500, 800] });
+  }
+  const userFont = selectFont(next, FONT_CHOICES.noto_bold);
+  assert.equal(designStyle(userFont).family, 'Noto Sans JP'); assert.equal(designStyle(userFont).weight, 700);
+  assert.equal(designStyle(userFont).size, DESIGN_VARIANTS.ending_thanks.aspectStyle.landscape.size);
+});
+
+test('共通8案は既存の書体とサイズ操作を保ち、用途案から戻した時は用途のサイズが残らない', () => {
+  const original = selectFont(newDraft(), FONT_CHOICES.yu_bold);
+  original.overrides.landscape.xml_pop = { size: 133, max_width: 1400 };
+  original.overrides.portrait.xml_pop = { size: 97, max_width: 880 };
+  for (const [id, variant] of Object.entries(DESIGN_VARIANTS).filter(([, v]) => v.category === 'common')) {
+    assert.equal(variant.fontChoice, undefined); assert.equal(variant.aspectStyle, undefined);
+    const changed = selectDesign(original, id);
+    assert.equal(designStyle(changed).size, 133); assert.equal(designStyle(changed).max_width, 1400);
+    assert.equal(designStyle(changed, 'portrait').size, 97);
+    assert.equal(changed.font.postscriptName, 'YuGothic-Bold');
+  }
+  const ending = selectDesign(original, 'ending_grand');
+  ending.overrides.landscape.xml_pop.size = 240;
+  const returned = selectDesign(ending, 'gold');
+  assert.equal(designStyle(returned).size, 110); assert.equal(designStyle(returned).max_width, 1580);
+  assert.equal(returned.font.postscriptName, 'NotoSerifJP-Black', '共通案は現在選択した書体を保持する');
+});
+
+test('用途案と手調整した書体・サイズを試作と標準デザインのJSONで保存復元できる', () => {
+  const draft = selectFont(selectDesign(newDraft(), 'heading_chapter'), FONT_CHOICES.noto_bold);
+  draft.overrides.landscape.xml_pop = { size: 139, max_width: 1550, in: 'slide_up', out_d: .35 };
+  draft.overrides.portrait.xml_pop = { size: 103 };
+  const restored = validateDraft(JSON.parse(JSON.stringify(draft)), names);
+  assert.deepEqual(restored, draft);
+  assert.equal(designStyle(restored).size, 139); assert.equal(fontForStyle(restored, designStyle(restored)).postscriptName, 'NotoSansJP-Bold');
+  const defaults = validateDefaults(JSON.parse(JSON.stringify({ kind: 'effects-lab-design-defaults', version: 1, defaults: { xml_pop: captureDesignDefault(draft) } })), names);
+  const next = selectDesign({ ...newDraft(), text: '別の字幕', duration: 2 }, 'reaction_deadpan');
+  next.overrides.landscape.xml_pop = { in: 'drop' };
+  const applied = applyDesignDefault(next, defaults);
+  assert.equal(applied.design, 'heading_chapter'); assert.equal(designStyle(applied).size, 139);
+  assert.equal(designStyle(applied).in, 'drop'); assert.equal(applied.text, '別の字幕'); assert.equal(applied.duration, 2);
+  assert.equal(applied.font.postscriptName, 'NotoSansJP-Bold');
+  const fresh = selectDesign(applied, 'heading_news');
+  assert.equal(designStyle(fresh).size, DESIGN_VARIANTS.heading_news.aspectStyle.landscape.size);
+  assert.equal(fresh.font.postscriptName, 'YuGothic-Bold');
+  const original = JSON.stringify(DESIGN_VARIANTS.heading_news); const copy = variantStyle('heading_news', 'landscape');
+  copy.strokes[0].w = 99; copy.size = 22;
+  assert.equal(JSON.stringify(DESIGN_VARIANTS.heading_news), original, '見本を外から書き換えない');
 });
