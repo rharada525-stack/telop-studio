@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildTextXml, plainText, xmlStyleWarnings, motionSamples } from '../admin/effects-lab/text-xml.mjs';
-import { NATIVE_PRESETS, XML_PRESETS, nativeStyles } from '../admin/effects-lab/native-presets.mjs';
-import { EFFECTS, sceneFor, newDraft, SAMPLES } from '../admin/effects-lab/model.mjs';
+import { NATIVE_PRESETS, XML_PRESETS, DESIGN_VARIANTS, nativeStyles } from '../admin/effects-lab/native-presets.mjs';
+import { EFFECTS, sceneFor, newDraft, SAMPLES, designStyle } from '../admin/effects-lab/model.mjs';
 
 test('新旧の演出をラボ内の試作として残し、本体の演出に追加しない', () => {
   for (const [id, preset] of Object.entries(NATIVE_PRESETS)) for (const aspect of ['portrait', 'landscape']) {
@@ -25,15 +25,15 @@ test('日本語・改行・XMLの特殊文字を文字として格納し、画�
   assert.equal(plainText('前\u0000\u000b後\r\n次'), '前後\n次');
 });
 
-test('3個の時間と縦横の解像度を保持し、元のデータを変更しない', () => {
+test('全演出の時間と縦横の解像度を保持し、元のデータを変更しない', () => {
   const items = Object.values(XML_PRESETS).map((preset, i) => ({ text: preset.sample, t: i * 4 + .5, d: 3 }));
   const before = JSON.stringify(items);
   for (const [W, H] of [[1920, 1080], [1080, 1920]]) {
     const xml = buildTextXml({ W, H, items });
     assert.match(xml, new RegExp(`<width>${W}</width><height>${H}</height>`));
-    assert.deepEqual([...xml.matchAll(/<start>(\d+)<\/start><end>(\d+)<\/end>/g)].map(m => m.slice(1).map(Number)), [[15, 105], [135, 225], [255, 345]]);
-    assert.equal((xml.match(/<generatoritem\b/g) || []).length, 3);
-    assert.match(xml, /<duration>345<\/duration><rate>/);
+    assert.deepEqual([...xml.matchAll(/<start>(\d+)<\/start><end>(\d+)<\/end>/g)].map(m => m.slice(1).map(Number)), items.map(item => [Math.round(item.t * 30), Math.round((item.t + item.d) * 30)]));
+    assert.equal((xml.match(/<generatoritem\b/g) || []).length, items.length);
+    assert.match(xml, new RegExp(`<duration>${Math.round((items.at(-1).t + 3) * 30)}</duration><rate>`));
   }
   assert.equal(JSON.stringify(items), before);
 });
@@ -128,6 +128,43 @@ test('フチを外した場合も、従来のText generatorとPostScript名を�
   assert.match(xml, /<effectid>Text<\/effectid>/);
   assert.match(xml, /<value>YuGothic-Bold<\/value>/);
   assert.doesNotMatch(xml, /GraphicAndType/);
+});
+
+test('フチのないグラデーションも単色へ落とさず、編集可能なSource Textで渡す', () => {
+  const style = { ...nativeStyles('landscape').xml_pop, strokes: [], fill: { stops: ['#fff2bd', '#b26b10', '#ffe989'], angle: 0 } };
+  const xml = buildTextXml({ items: [{ text: 'グラデーション', t: .5, d: 3, style, fontName: 'NotoSansJP-Black' }], fontName: 'YuGothic-Bold' });
+  const d = sourceData(xml);
+  assert.equal(d.font, 'NotoSansJP-Black');
+  assert.equal(d.text, 'グラデーション');
+  assert.equal(d.bytes.readUInt32LE(d.character[20]), 1);
+  assert.equal(d.bytes.readUInt32LE(d.character[5]), 0);
+  assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
+  assert.throws(() => buildTextXml({ items: [{ text: '確認', t: 0, d: 1, style, fontName: 'Noto Sans JP' }] }), /PostScript/);
+});
+
+test('デザインの塗り・フチの未対応グラデーション指定を保存時に検出する', () => {
+  const base = nativeStyles('landscape').xml_pop;
+  for (const paint of [{ stops: ['#ffffff', '#000000'], angle: 90 }, { stops: ['#ffffff'] }, { stops: ['#ffffff', '#000000'], type: 'radial' }]) {
+    for (const style of [{ ...base, fill: paint }, { ...base, strokes: [{ w: 7, color: paint }] }]) {
+      assert.ok(xmlStyleWarnings(style).length);
+      assert.throws(() => buildTextXml({ items: [{ text: '確認', t: 0, d: 1, style }] }), /まだ渡せません/);
+    }
+  }
+});
+
+test('全デザインと全演出の組み合わせを下配置の編集可能な文字XMLで渡せる', () => {
+  for (const fx of Object.keys(XML_PRESETS)) for (const design of Object.keys(DESIGN_VARIANTS)) {
+    const draft = { ...newDraft(), fx, design, text: '編集できるテロップ' };
+    const style = designStyle(draft);
+    const xml = buildTextXml({ items: [{ text: draft.text, t: .5, d: 3, style }], fontName: draft.font.postscriptName });
+    const d = sourceData(xml);
+    assert.equal(d.text, draft.text); assert.equal(d.font, draft.font.postscriptName);
+    assert.equal(d.bytes.readUInt32LE(d.character[20]), design === 'classic' ? 0 : 1);
+    assert.deepEqual(style.pos, [960, 900]); assert.equal(style.rotate || 0, 0);
+    assert.equal((xml.match(/<clipitem /g) || []).length, 1);
+    assert.match(xml, /<effectid>basic<\/effectid>/);
+    assert.doesNotMatch(xml, /<pathurl>|\.png|\.mp4|\.mogrt/);
+  }
 });
 
 test('横長のおまかせ位置は全案とも下中央、3案の標準の傾きは0度', () => {

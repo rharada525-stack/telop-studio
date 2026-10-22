@@ -20,6 +20,10 @@ export function createLocalFontStore({ query, register }) {
     families,
     async read() { const result = await query(); fonts = result; return families(); },
     premiereName(family, weight) { return match(family, weight)?.postscriptName || ''; },
+    describe(family, weight) {
+      const face = match(family, weight);
+      return face ? { family: face.family, weight: fontWeight(face), postscriptName: face.postscriptName } : null;
+    },
     cssFamily(family) { return loadedFamilies.has(family) ? aliases.get(family) : family; },
     async load(family, weight) {
       const face = match(family, weight);

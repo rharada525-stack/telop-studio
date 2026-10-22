@@ -2,7 +2,7 @@
 // 2026-10-23、Premiere 2026で横長のNoto Sans JP Black・多重フチ・文字編集を確認。
 // https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Applications/Applications.html
 import { blockState } from '../../telop-studio/js/block-motion.js';
-import { makeTextData, base64 } from './source-text.mjs';
+import { makeTextData, base64, isSupportedPaint } from './source-text.mjs?v=20261023-rich1';
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[ch]));
 const rate = '<rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>';
 const parameter = (id, name, value) => `<parameter><parameterid>${id}</parameterid><name>${name}</name><value>${value}</value></parameter>`;
@@ -16,10 +16,10 @@ export function xmlStyleWarnings(st, text = '') {
   if (!st) return ['演出を選んでください'];
   const reasons = [];
   if (st.group || st.effect || st.vertical) reasons.push('複合パーツ・画面効果・縦書き');
-  if (st.strokes && (!Array.isArray(st.strokes) || st.strokes.length > 4 || st.strokes.some(s => !Number.isFinite(s.w) || s.w < 0 || s.w > 80 || !/^#[\da-f]{6}$/i.test(s.color)))) reasons.push('単色以外・範囲外のフチ');
+  if (st.strokes && (!Array.isArray(st.strokes) || st.strokes.length > 4 || st.strokes.some(s => !s || !Number.isFinite(s.w) || s.w < 0 || s.w > 80 || !isSupportedPaint(s.color)))) reasons.push('未対応の色・範囲外のフチ');
   if (st.shadows?.length) reasons.push('影');
   if (st.plate) reasons.push('背景プレート');
-  if (!/^#[\da-f]{6}$/i.test(st.fill || '')) reasons.push('単色以外の塗り');
+  if (!isSupportedPaint(st.fill)) reasons.push('未対応の塗り（単色・縦グラデーションに対応）');
   if (st.char) reasons.push('1文字ずつの動き');
   if (!enters.has(st.in || 'none') || !exits.has(st.out || 'fade') || !idles.has(st.idle || 'none')) reasons.push('ワイプ・変形などの動き');
   if (st.tracking) reasons.push('字間の指定');
@@ -82,7 +82,11 @@ export function buildTextXml({ name = '演出ラボ_文字の読み込みテス�
   if (![W, H].every(n => Number.isInteger(n) && n > 0 && n <= 8192)) throw new Error('画面サイズが不正です。');
   // OpenType name ID 6のPostScript名。表示用ファミリー名を変形・推測して渡さない。
   // https://learn.microsoft.com/en-us/typography/opentype/spec/name
-  if (typeof fontName !== 'string' || !fontName.length || fontName.length > 63 || /[^\x21-\x7e]|[\[\](){}<>/%]/.test(fontName)) throw new Error('PCのフォントから選ぶか、PostScript名（例: YuGothic-Bold）を入力してください。');
+  const checkFont = font => {
+    if (typeof font !== 'string' || !font.length || font.length > 63 || /[^\x21-\x7e]|[\[\](){}<>/%]/.test(font)) throw new Error('PCのフォントから選ぶか、PostScript名（例: YuGothic-Bold）を入力してください。');
+    return font;
+  };
+  checkFont(fontName);
   if (!Array.isArray(items) || !items.length || items.length > 100) throw new Error('1〜100個の文字を指定してください。');
   const clips = items.map((item, index) => {
     const text = plainText(item.text ?? '');
@@ -99,11 +103,11 @@ export function buildTextXml({ name = '演出ラボ_文字の読み込みテス�
           style.out_d != null && (!Number.isFinite(style.out_d) || style.out_d < 0 || style.out_d > 3) ||
           style.pos != null && (!Array.isArray(style.pos) || style.pos.length !== 2 || !style.pos.every(n => Number.isFinite(n) && Math.abs(n) <= 10000))) throw new Error('文字サイズ・位置・傾き・退場時間が不正です。');
     }
-    return { text, start, end, index, style };
+    return { text, start, end, index, style, fontName: checkFont(item.fontName ?? fontName) };
   }).sort((a, b) => a.start - b.start);
   if (clips.some((clip, i) => i && clip.start < clips[i - 1].end)) throw new Error('文字の表示時間を重ねないでください。');
-  const generators = clips.map(({ text, start, end, index, style }) => {
-    if (style?.strokes?.some(s => s.w > 0)) return graphicClip({ text, start, end, index, style }, W, H, fontName);
+  const generators = clips.map(({ text, start, end, index, style, fontName }) => {
+    if (style && (typeof style.fill !== 'string' || style.strokes?.some(s => s.w > 0))) return graphicClip({ text, start, end, index, style }, W, H, fontName);
     const rgb = style ? style.fill.slice(1).match(/../g).map(n => parseInt(n, 16)) : [255, 255, 255];
     // PremiereのFCP Text変換は480行基準。既存の読み込み用XMLはそのまま保持。
     const size = style ? num(style.size * 480 / H) : String(Math.round(H * .075));

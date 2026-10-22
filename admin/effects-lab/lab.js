@@ -1,10 +1,10 @@
 import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-effects2';
-import { resolveStyles } from '../../telop-studio/js/telop.js?v=20261022-effects2';
+import { resolveStyles, makeItem } from '../../telop-studio/js/telop.js?v=20261022-effects2';
 import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs?v=20261023-tv1';
-import { XML_PRESETS, nativeStyles } from './native-presets.mjs?v=20261023-tv1';
-import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-tv1';
+import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, validateDefaults, fontForStyle } from './model.mjs?v=20261023-rich1';
+import { XML_PRESETS, DESIGN_VARIANTS, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-rich1';
+import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-rich1';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
 
@@ -17,7 +17,9 @@ let raw, base, draft, scene, baseline, prototype, generation = 0, timer, prepari
 let saved = [], savedId = '', part = '', t = 0, playing = false, lastTick = 0, animation, playbackRun = 0;
 let media = null, mediaURL = '', mediaGeneration = 0, background;
 let audioContext, audioNodes = [], audioGeneration = 0;
-let styleDirty = false;
+let exporting = false;
+const dirtyFields = new Set();
+let styleDirty = false, defaults = {}, cardGeneration = 0, cardsKey = "";
 const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d' };
 const audioBuffers = new Map();
 const contexts = { original: $('original').getContext('2d'), preview: $('preview').getContext('2d') };
@@ -29,8 +31,8 @@ const idles = { none: 'なし', pulse: '脈動', float: '浮遊', tremble: '震�
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
 function setPreparing(value) {
   preparing = value;
-  for (const id of ['play', 'replay', 'prev', 'next', 'seek', 'png', 'nativeExport', 'nativeBatch']) $(id).disabled = value;
-  for (const button of $('effects').children) button.disabled = value;
+  for (const id of ['play', 'replay', 'prev', 'next', 'seek', 'png', 'nativeExport', 'nativeBatch', 'designBatch', 'setDefault', 'resetDefault', 'fontChoice']) $(id).disabled = value || (exporting && ['nativeExport', 'nativeBatch', 'designBatch'].includes(id));
+  for (const button of [...$('effects').children, ...$('designs').children]) button.disabled = value;
 }
 function options(id, entries) { $(id).replaceChildren(...Object.entries(entries).map(([value, text]) => new Option(text, value))); }
 function persistWorking() {
@@ -47,6 +49,7 @@ async function init() {
   base = resolveStyles(raw);
   options('set', Object.fromEntries(Object.entries(DESIGN_SETS).map(([key, item]) => [key, item.name])));
   options('position', FX_POS); options('screen', SCREEN);
+  options('fontChoice', { ...Object.fromEntries(Object.entries(FONT_CHOICES).map(([id, font]) => [id, font.name])), custom: 'PCで選択したフォント' });
   options('enter', enters); options('exit', exits); options('idle', idles);
   for (const [key, fx] of Object.entries(FX)) {
     const button = document.createElement('button');
@@ -57,13 +60,21 @@ async function init() {
       next.name = `${fx.name === 'なし' ? '画面効果' : fx.name}の試作`;
       // 画面効果だけの初期値。通常字幕はseparateのチェックで隠せる。
       next.screen = key ? 'auto' : 'zoom_lines';
-      savedId = ''; setDraft(next, true);
+      savedId = ''; setDraft(applyDesignDefault(next, defaults), true);
     };
     $('effects').append(button);
   }
   $('search').oninput = () => {
     for (const button of $('effects').children) button.hidden = !button.textContent.includes($('search').value.trim());
   };
+  for (const [id, design] of Object.entries(DESIGN_VARIANTS)) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'design-card'; button.dataset.design = id;
+    button.setAttribute('aria-label', `${design.name}・${design.tag}`);
+    const canvas = document.createElement('canvas'); canvas.width = 560; canvas.height = 140; canvas.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span'); name.textContent = design.name; button.append(canvas, name);
+    button.onclick = () => { clearTimeout(timer); setDraft(selectDesign(readControls(), id)); };
+    $('designs').append(button);
+  }
   draft = newDraft();
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -71,6 +82,11 @@ async function init() {
     const working = localStorage.getItem(`${STORAGE_KEY}:working`);
     if (working) draft = validateDraft(JSON.parse(working), Object.keys(base));
   } catch { status('前の試作を読み込めませんでした。保存済みデータは上書きしていません。', true); }
+  try {
+    const stored = localStorage.getItem(DEFAULTS_KEY);
+    if (stored) defaults = validateDefaults(JSON.parse(stored), Object.keys(base));
+    if (!localStorage.getItem(`${STORAGE_KEY}:working`)) draft = applyDesignDefault(draft, defaults);
+  } catch { status('標準デザインを読み込めませんでした。JSONは上書きしていません。', true); }
   renderSaved(); bind();
   await setDraft(draft, true);
 }
@@ -81,8 +97,9 @@ function readControls() {
   if (!prototype) return out;
   for (const id of controlIds) out[id] = id === 'separate' ? $(id).checked : id === 'duration' ? Number($(id).value) : $(id).value;
   if (styleDirty) {
-    const st = structuredClone(prototype.styles[part]);
-    for (const [id, key] of Object.entries(styleFields)) if (!$(id).disabled) st[key] = $(id).type === 'number' ? Number($(id).value) : $(id).value;
+    const st = structuredClone(designStyle(draft) && part === draft.fx ? out.overrides[draft.aspect][part] || {} : prototype.styles[part]);
+    if (draft.font && XML_PRESETS[draft.fx]) for (const key of ['font', 'family', 'weight']) delete st[key];
+    for (const [id, key] of Object.entries(styleFields)) if (dirtyFields.has(id) && !$(id).disabled) st[key] = $(id).type === 'number' ? Number($(id).value) : $(id).value;
     out.overrides[draft.aspect][part] = st;
   }
   return out;
@@ -99,7 +116,7 @@ function syncControls() {
   const names = Object.fromEntries(parts.map((key, index) => [key, index === 0 ? (style.group ? '全体（見出し＋本文）' : 'テロップ全体') : index === 1 ? '見出しラベル' : '見出しの本文']));
   options('part', names);
   part = parts.includes(part) ? part : parts[0]; $('part').value = part;
-  syncStyle();
+  syncStyle(); syncDesigns();
 }
 
 async function prepare(next) {
@@ -107,7 +124,8 @@ async function prepare(next) {
   const setup = sceneFor(next);
   const makeRenderer = async changed => {
     const renderer = new Renderer(base, raw); renderer.setFormat(next.aspect);
-    const overrides = changed ? next.overrides[next.aspect] : {};
+    const configured = designStyle(next, next.aspect, changed);
+    const overrides = { ...(changed ? next.overrides[next.aspect] : {}), ...(configured ? { [next.fx]: configured } : {}) };
     renderer.setOverrides(() => ({ subtitle: setup.subtitle, ...overrides, 'subtitle@A': overrides.subtitle || setup.subtitle }));
     // グループの子は文字ブロックのみ。JSONでグループを入れ子にしない。
     for (const st of Object.values(renderer.styles)) if (st.group) {
@@ -150,7 +168,7 @@ async function setDraft(next, resetTime = false) {
 }
 
 function syncStyle() {
-  styleDirty = false;
+  styleDirty = false; dirtyFields.clear();
   const st = prototype.styles[part];
   const values = { fill: /^#[\da-f]{6}$/i.test(st.fill) ? st.fill : '#ffffff', size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18 };
   for (const [id, value] of Object.entries(values)) $(id).value = value;
@@ -159,9 +177,14 @@ function syncStyle() {
   const child = part !== scene.style && prototype.styles[scene.style].group;
   for (const id of ['exit', 'outDuration']) { $(id).disabled = !!child; $(id).title = child ? '退場は「全体（見出し＋本文）」で調整します' : ''; }
   $('json').value = JSON.stringify(st, null, 2);
+  updateXmlControls();
+}
+
+function updateXmlControls() {
   const warnings = xmlStyleWarnings(prototype.styles[scene.style], draft.text);
-  $('nativeExport').disabled = !draft.fx || !draft.text.trim() || !!warnings.length;
-  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の3案から選べます。` : '文字・多重フチ・位置・動きをXMLに保存できます。';
+  if (!fontForStyle(draft, prototype.styles[scene.style])) warnings.push('書体を選び直してください');
+  $('nativeExport').disabled = exporting || !draft.fx || !draft.text.trim() || !!warnings.length;
+  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の演出から選べます。` : '文字・グラデーション・フチ・動きをXMLに保存できます。';
 }
 
 function bind() {
@@ -177,12 +200,13 @@ function bind() {
   for (const id of Object.keys(styleFields)) $(id).addEventListener($(id).type === 'number' ? 'input' : 'change', () => {
     clearTimeout(timer);
     if (!$(id).checkValidity()) { status('指定できる範囲の数値を入力してください。', true); return; }
-    styleDirty = true; stop(); status('描画を準備中…');
+    styleDirty = true; dirtyFields.add(id); stop(); status('描画を準備中…');
     timer = setTimeout(() => setDraft(readControls()), $(id).type === 'number' ? 200 : 0);
   });
   $('applyJson').onclick = () => {
     try {
       const style = validateStyle(JSON.parse($('json').value), Object.keys(base));
+      if (XML_PRESETS[draft.fx] && draft.font && ((style.family && style.family !== draft.font.family) || (style.weight != null && style.weight !== draft.font.weight) || (style.font && style.font !== prototype.styles[part].font))) throw new Error('書体は上の書体メニューか「PCのフォント」で変更してください。');
       const next = readControls(); next.overrides[next.aspect][part] = style; setDraft(next);
     } catch (error) { status(`JSONを適用できません: ${error.message}`, true); }
   };
@@ -214,9 +238,31 @@ function bind() {
     clean.toBlob(blob => { if (blob) download(blob, `演出テスト-${draft.fx || 'screen'}-${Math.round(t * FPS)}f.png`); });
   };
   $('nativeExport').onclick = () => exportNative(false);
-  $('nativeBatch').onclick = () => exportNative(true);
-  attachFontPicker($('xmlFontPicker'), { input: $('xmlFont'), getWeight: () => 700,
-    onSelect: family => { $('xmlFont').value = localFonts.premiereName(family, 700); } });
+  $('nativeBatch').onclick = () => exportNative('motions');
+  $('designBatch').onclick = () => exportNative('designs');
+  $('fontChoice').onchange = () => {
+    const font = FONT_CHOICES[$('fontChoice').value];
+    if (font) { clearTimeout(timer); setDraft(selectFont(readControls(), font)); }
+  };
+  attachFontPicker($('xmlFontPicker'), { input: $('fontFamily'), getWeight: () => draft.font?.weight || 900,
+    onSelect: family => {
+      const font = localFonts.describe(family, draft.font?.weight || 900);
+      if (!font) { status('この書体の情報を取得できません。PCのフォントを読み直してください。', true); return; }
+      clearTimeout(timer); setDraft(selectFont(readControls(), font));
+    } });
+  $('setDefault').onclick = async () => {
+    if (!await setDraft(readControls())) return;
+    const next = { ...defaults, [draft.fx]: captureDesignDefault(draft) };
+    if (persistDefaults(next)) { syncDesigns(); status('この動きの標準デザインを保存しました。次に選ぶと適用されます。'); }
+  };
+  $('resetDefault').onclick = () => {
+    const next = { ...defaults }; delete next[draft.fx];
+    if (persistDefaults(next)) { syncDesigns(); status('この動きの標準指定を解除しました。'); }
+  };
+  $('exportDefaults').onclick = () => {
+    download(new Blob([JSON.stringify(defaultsBackup(defaults), null, 2)], { type: 'application/json' }), '演出ラボ_標準デザイン.json');
+    status('標準指定を保存しました。「JSONを読み込む」で戻せます。');
+  };
   $('save').onclick = async () => {
     if (!await setDraft(readControls())) return;
     const id = savedId || crypto.randomUUID();
@@ -230,7 +276,7 @@ function bind() {
     const entry = saved.find(item => item.id === $('saved').value);
     if (entry && await setDraft(entry.draft, true)) savedId = entry.id;
   };
-  $('new').onclick = () => { savedId = ''; $('saved').value = ''; setDraft(newDraft(), true); };
+  $('new').onclick = () => { savedId = ''; $('saved').value = ''; setDraft(applyDesignDefault(newDraft(), defaults), true); };
   $('export').onclick = async () => {
     if (!await setDraft(readControls())) return;
     download(new Blob([JSON.stringify(draft, null, 2)], { type: 'application/json' }), `${draft.name.replace(/[\\/:*?"<>|]/g, '_') || '演出の試作'}.json`);
@@ -240,10 +286,16 @@ function bind() {
     try {
       const file = $('import').files[0]; if (!file) return;
       if (file.size > 250000) throw new Error('250KB以下のJSONを選んでください。');
-      const next = validateDraft(JSON.parse(await file.text()), Object.keys(base));
+      const data = JSON.parse(await file.text());
+      if (data?.kind === 'effects-lab-design-defaults') {
+        const imported = validateDefaults(data, Object.keys(base));
+        if (persistDefaults({ ...defaults, ...imported })) { syncDesigns(); status('標準デザインを読み込みました。次に動きを選ぶと適用されます。'); }
+        return;
+      }
+      const next = validateDraft(data, Object.keys(base));
       if (await setDraft(next, true)) { savedId = ''; status(`「${draft.name}」を読み込みました。`); }
     } catch (error) { status(error.message, true); }
-    $('import').value = '';
+    finally { $('import').value = ''; }
   };
   document.addEventListener('keydown', event => {
     if (/INPUT|TEXTAREA|SELECT|BUTTON|SUMMARY/.test(event.target.tagName)) return;
@@ -255,9 +307,14 @@ function bind() {
 }
 
 async function exportNative(batch) {
+  if (exporting) return;
+  exporting = true;
   try {
     if (!await setDraft(readControls())) return;
-    const W = prototype.W, H = prototype.H;
+    const W = prototype.W, H = prototype.H, snapshot = structuredClone(draft), snapshotStyle = scene.style;
+    const exportFont = fontForStyle(snapshot, prototype.styles[snapshotStyle]);
+    if (!exportFont) throw new Error('書体を選び直してください。');
+    const fontName = exportFont.postscriptName;
     // 実際の描画で決まった縮小後のサイズ・配置を渡す。設定値のままだと長文がはみ出す。
     const renderedItem = (renderer, styleId) => {
       const item = renderer.items.find(item => item.style === styleId);
@@ -266,19 +323,65 @@ async function exportNative(batch) {
         size: item.obj.block.size, pos: [item.obj.center(), item.obj.centerY()] } };
     };
     let items;
-    if (batch) {
+    if (batch === 'motions') {
       items = [];
       for (const [id, preset] of Object.entries(XML_PRESETS)) {
-        const result = await prepare({ ...newDraft(), aspect: draft.aspect, fx: id, text: preset.sample, separate: false });
+        let sample = { ...newDraft(), aspect: snapshot.aspect, fx: id, text: preset.sample, separate: false, design: snapshot.design, font: exportFont };
+        if (XML_PRESETS[snapshot.fx]) sample = applyDesignDefault(sample, { [id]: { ...captureDesignDefault(snapshot), font: exportFont } });
+        const result = await prepare(sample);
         items.push({ ...renderedItem(result.changed, id), t: items.length * 4 + .5 });
       }
-    } else items = [renderedItem(prototype, scene.style)];
-    const name = batch ? '演出ラボ_演出3案' : `演出ラボ_${draft.name.replace(/[\\/:*?"<>|]/g, '_')}`;
-    const fontName = $('xmlFont').value;
+    } else if (batch === 'designs') {
+      items = [];
+      for (const id of Object.keys(DESIGN_VARIANTS)) {
+        const next = selectDesign(snapshot, id); const result = await prepare(next);
+        items.push({ ...renderedItem(result.changed, result.setup.style), t: items.length * (snapshot.duration + 1) + .5 });
+      }
+    } else items = [renderedItem(prototype, snapshotStyle)];
+    const name = batch === 'motions' ? '演出ラボ_動き8案' : batch === 'designs' ? '演出ラボ_デザイン8案' : `演出ラボ_${snapshot.name.replace(/[\\/:*?"<>|]/g, '_')}`;
     const xml = buildTextXml({ name, W, H, items, fontName });
     download(new Blob([xml], { type: 'application/xml;charset=utf-8' }), `${name}_${fontName.replace(/[\\/:*?"<>|]/g, '_')}.xml`);
     status('演出XMLを保存しました。Premiereの「ファイル → 読み込み」で開き、文字・フチ・動きを調整できます。');
   } catch (error) { status(`Premiere用データを保存できません: ${error.message}`, true); }
+  finally { exporting = false; setPreparing(preparing); if (prototype && !preparing) { updateXmlControls(); syncDesigns(); } }
+}
+
+
+function defaultsBackup(value) { return { kind: 'effects-lab-design-defaults', version: 1, defaults: value }; }
+function persistDefaults(next) {
+  try { localStorage.setItem(DEFAULTS_KEY, JSON.stringify(defaultsBackup(next))); defaults = next; return true; }
+  catch { status('標準指定を保存できません。JSONへの保存を使ってください。', true); return false; }
+}
+function syncDesigns() {
+  const native = !!XML_PRESETS[draft.fx];
+  $('designSection').hidden = !native;
+  $('setDefault').disabled = !native; $('resetDefault').disabled = !native || !defaults[draft.fx];
+  $('designBatch').disabled = exporting || !native || !!xmlStyleWarnings(prototype.styles[scene.style], draft.text).length;
+  $('fontChoice').disabled = !native;
+  for (const button of $('xmlFontPicker').querySelectorAll('button')) button.disabled = !native;
+  const effectiveStyle = prototype.styles[scene.style];
+  const font = fontForStyle(draft, effectiveStyle) || { family: effectiveStyle.family || '未選択', weight: effectiveStyle.weight || 900, postscriptName: '' };
+  $('fontFamily').value = font.family; $('xmlFont').value = font.postscriptName;
+  $('fontChoice').value = Object.entries(FONT_CHOICES).find(([, f]) => f.postscriptName === font.postscriptName)?.[0] || 'custom';
+  $('designName').textContent = DESIGN_VARIANTS[draft.design]?.name || '元のデザイン';
+  for (const button of $('designs').children) button.setAttribute('aria-pressed', String(button.dataset.design === draft.design));
+  const preferred = defaults[draft.fx];
+  $('defaultStatus').textContent = preferred ? `標準：${DESIGN_VARIANTS[preferred.design]?.name || 'カスタム'} / ${preferred.font?.family || '元の書体'}` : '標準は未指定（このPCのラボだけに保存）';
+  if (native) renderDesignCards(font).catch(error => status(`デザイン見本を表示できません: ${error.message}`, true));
+}
+async function renderDesignCards(font) {
+  const request = ++cardGeneration;
+  const key = JSON.stringify(font); if (key === cardsKey) return;
+  await Promise.all([...$('designs').children].map(async button => {
+    const style = { ...nativeStyles('landscape').xml_pop, ...structuredClone(DESIGN_VARIANTS[button.dataset.design].style),
+      family: font.family, weight: font.weight, size: 52, max_width: 515, pos: [280, 70], in: 'none', out: 'none', out_d: 0 };
+    style.strokes = style.strokes.map(stroke => ({ ...stroke, w: stroke.w * .47 }));
+    const item = await makeItem({ text: '伝わるテロップ', style: 'sample', t: 0, d: 3 }, { sample: style }, 560, 140, FPS);
+    if (request !== cardGeneration) return;
+    const canvas = button.querySelector('canvas'), ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height);
+    item.draw(ctx, 1, 3);
+  }));
+  if (request === cardGeneration) cardsKey = key;
 }
 
 function renderSaved() {

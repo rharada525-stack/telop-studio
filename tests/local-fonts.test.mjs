@@ -49,3 +49,16 @@ test('未許可・読み込み失敗を成功扱いせず、失敗後も再試�
 test('英語と国内フォントで使う太さ表記を区別する', () => {
   for (const [style, expected] of [['Bold', 700], ['ExtraBold', 800], ['SemiBold', 600], ['Black', 900], ['Medium', 500], ['EB', 800], ['R', 400], ['B', 700]]) assert.equal(fontWeight({ style }), expected);
 });
+
+test('XMLと描画へ同じ実フォントの太さを渡し、PostScript名から推測しない', async () => {
+  const face = { family: 'テスト国内書体', style: 'B', postscriptName: 'DomesticFace-B' };
+  const calls = [];
+  const store = createLocalFontStore({ query: async () => [face], register: async (...args) => calls.push(args) });
+  assert.equal(store.describe(face.family, 900), null);
+  await store.read();
+  const selected = store.describe(face.family, 900);
+  assert.deepEqual(selected, { family: face.family, weight: 700, postscriptName: face.postscriptName });
+  await store.load(selected.family, selected.weight);
+  assert.equal(calls[0][1].postscriptName, selected.postscriptName);
+  assert.equal(calls[0][2], selected.weight);
+});

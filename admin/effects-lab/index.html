@@ -6,8 +6,8 @@
 <meta name="robots" content="noindex,nofollow">
 <title>演出ラボ | テロップスタジオ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@800&family=Shippori+Mincho+B1:wght@800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link href="lab.css?v=20261022-effects3" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=Noto+Serif+JP:wght@900&family=M+PLUS+Rounded+1c:wght@800&family=Shippori+Mincho+B1:wght@800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
+<link href="lab.css?v=20261023-rich1" rel="stylesheet">
 <link href="../../telop-studio/css/font-picker.css?v=20261022-fonts1" rel="stylesheet">
 </head>
 <body>
@@ -15,7 +15,7 @@
 <p id="blocked" hidden>このページはローカル専用です。Start-Lab.ps1から開いてください。</p>
 <main id="lab" hidden>
   <aside class="library panel">
-    <h1>演出を選ぶ</h1>
+    <h1>動きを選ぶ</h1>
     <input id="search" type="search" placeholder="演出を検索" aria-label="演出を検索">
     <nav id="effects" aria-label="演出の一覧"></nav>
     <details class="drafts" open><summary>保存した試作</summary>
@@ -36,6 +36,11 @@
       <input id="seek" type="range" min="0" max="4.2" step="0.033333333333" value="0" aria-label="演出の再生位置">
       <div class="play-row options"><label>速度<select id="speed"><option value="0.25">0.25倍</option><option value="0.5">0.5倍</option><option value="1" selected>1倍</option></select></label><label><input type="checkbox" id="loop" checked> ループ</label><label><input type="checkbox" id="sound" checked> 効果音</label><label><input type="checkbox" id="guides"> ガイド</label><button id="png" type="button" class="ghost" title="比較・共有用の静止画です。">確認画像を保存</button></div>
     </div>
+    <section id="designSection" class="design-section" aria-label="テロップのデザイン">
+      <div class="design-heading"><h2>デザインを選ぶ</h2><small id="designName"></small></div>
+      <div id="designs" class="design-grid" role="group" aria-label="同じ動きのデザイン候補"></div>
+      <div class="design-actions"><button id="setDefault" type="button" class="ghost">この動きの標準にする</button><button id="resetDefault" type="button" class="ghost">標準指定を解除</button><small id="defaultStatus"></small></div>
+    </section>
     <div class="background-controls"><label>背景<select id="background"><option value="scene">テスト背景</option><option value="dark">暗い背景</option><option value="light">明るい背景</option><option value="checker">市松</option></select></label><label class="file-button">画像・動画を使う<input id="media" type="file" accept="image/*,video/*" hidden></label><button id="clearMedia" class="ghost" type="button" hidden>素材を外す</button><label id="offsetLabel" hidden>動画の開始位置（秒）<input id="offset" type="number" min="0" step="0.1" value="0"></label><span id="mediaName"></span></div>
     <p id="status" role="status" aria-live="polite">準備中…</p>
   </section>
@@ -43,6 +48,8 @@
   <aside class="inspector panel">
     <h2>試作する</h2>
     <div class="two"><label>画面<select id="aspect"><option value="landscape">横 16:9</option><option value="portrait">縦 9:16</option></select></label><label>デザインセット<select id="set"></select></label></div>
+    <label>書体<select id="fontChoice"></select></label>
+    <div id="xmlFontPicker"><input id="fontFamily" type="text" readonly aria-label="選択中のフォント"></div>
     <label>演出の文字<textarea id="text" rows="2" maxlength="300"></textarea></label>
     <div class="samples"><button data-sample="short" class="ghost" type="button">短文</button><button data-sample="long" class="ghost" type="button">長文</button><button data-sample="lines" class="ghost" type="button">2行</button><button data-sample="default" class="ghost" type="button">見本に戻す</button></div>
     <small>{ } は強調色、[ ] は強調色2</small>
@@ -68,12 +75,14 @@
     <h2>Premiere用XML</h2>
     <small id="nativeNote">Premiereで文字編集・フォント・多重フチを確認済み。演出の文字だけを書き出します。</small>
     <small id="xmlSupport" role="status"></small>
-    <div id="xmlFontPicker"><label>XMLのフォント（PostScript名）<input id="xmlFont" type="text" value="NotoSansJP-Black" maxlength="63"></label></div>
+    <details><summary>書き出すフォント</summary><input id="xmlFont" type="text" value="NotoSansJP-Black" readonly aria-label="XMLのフォント（PostScript名）"></details>
     <button id="nativeExport" type="button" class="ghost">この演出をXMLに保存</button>
-    <button id="nativeBatch" type="button" class="ghost">演出3案のXMLを保存</button>
-    <small>3案は元の見本をまとめます。通常字幕・背景・画面効果・効果音は含みません。</small>
+    <button id="nativeBatch" type="button" class="ghost">動き8案のXMLを保存</button>
+    <button id="designBatch" type="button" class="ghost">この動き × デザイン8案のXML</button>
+    <button id="exportDefaults" type="button" class="ghost">標準指定をJSONに保存</button>
+    <small>動き8案は選択中のデザイン・書体で保存します。通常字幕・背景・画面効果・効果音は含みません。</small>
   </aside>
 </main>
-<script type="module" src="lab.js?v=20261023-tv1"></script>
+<script type="module" src="lab.js?v=20261023-rich1"></script>
 </body>
 </html>
