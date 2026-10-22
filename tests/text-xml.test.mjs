@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { buildTextXml, plainText, xmlStyleWarnings, motionSamples } from '../admin/effects-lab/text-xml.mjs';
 import { NATIVE_PRESETS, XML_PRESETS, DESIGN_VARIANTS, FONT_CHOICES, nativeStyles } from '../admin/effects-lab/native-presets.mjs';
 import { EFFECTS, sceneFor, newDraft, SAMPLES, designStyle, selectDesign, fontForStyle } from '../admin/effects-lab/model.mjs';
+import { getSparkleClips, SPARKLE_TYPES } from '../admin/effects-lab/sparkles.mjs';
 
 test('新旧の演出をラボ内の試作として残し、本体の演出に追加しない', () => {
   for (const [id, preset] of Object.entries(NATIVE_PRESETS)) for (const aspect of ['portrait', 'landscape']) {
@@ -84,6 +85,10 @@ function sourceData(xml) {
     text: string(ref(part[0])), font: string(ref(fonts + 4)), rgb };
 }
 
+const videoTracks = xml => [...xml.matchAll(/<track>([\s\S]*?)<\/track>/g)].map(match => match[1]);
+const graphicClips = track => [...track.matchAll(/<clipitem\b[\s\S]*?<\/clipitem>/g)].map(match => match[0]);
+const closeTo = (actual, expected, epsilon = 1e-5) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} ≈ ${expected}`);
+
 function assertPaint(d, fields, colorKey, modeKey, gradientKey, expected) {
   const rgb = color => color.slice(1).match(/../g).map(n => parseInt(n, 16));
   const gradient = typeof expected !== 'string';
@@ -103,12 +108,12 @@ function assertPaint(d, fields, colorKey, modeKey, gradientKey, expected) {
 function assertEditableStyle(d, style, fontName, text) {
   assert.equal(d.runCount, 1, '装飾ごとに文字を複製しない');
   assert.equal(d.fontCount, 1); assert.equal(d.font, fontName); assert.equal(d.text, text);
-  assert.equal(d.bytes.readFloatLE(d.character[1]), style.size);
+  closeTo(d.bytes.readFloatLE(d.character[1]), style.size);
   assert.equal(d.bytes.readUInt32LE(d.character[3]), 1, '文字の塗りが有効');
   assertPaint(d, d.character, 2, 20, 21, style.fill);
   assert.equal(d.bytes.readUInt32LE(d.character[5]), Number(!!style.strokes.length));
   if (style.strokes.length) {
-    assert.equal(d.bytes.readFloatLE(d.character[6]), style.strokes[0].w);
+    closeTo(d.bytes.readFloatLE(d.character[6]), style.strokes[0].w);
     assert.equal(d.bytes.readUInt32LE(d.character[24]), 2);
     assertPaint(d, d.character, 4, 22, 23, style.strokes[0].color);
   }
@@ -117,20 +122,21 @@ function assertEditableStyle(d, style, fontName, text) {
   style.strokes.slice(1).forEach((stroke, i) => {
     const fields = d.table(d.ref(strokes + 4 + i * 4));
     assert.equal(d.bytes.readUInt32LE(fields[1]), 1);
-    assert.equal(d.bytes.readFloatLE(fields[2]), stroke.w);
+    closeTo(d.bytes.readFloatLE(fields[2]), stroke.w);
     assert.equal(d.bytes.readUInt32LE(fields[5]), 2);
     assertPaint(d, fields, 0, 3, 4, stroke.color);
   });
 }
 
-test('フチ付き3案は1クリップ1文字レイヤーと編集可能なフチ・Motion/Opacityを持つ', () => {
+test('フチ付き演出の本文はV1の1クリップ1文字レイヤーと編集可能なフチ・Motion/Opacityを持つ', () => {
   for (const aspect of ['portrait', 'landscape']) {
     const [W, H] = aspect === 'portrait' ? [1080, 1920] : [1920, 1080];
     const styles = nativeStyles(aspect);
     for (const [id, preset] of Object.entries(XML_PRESETS)) {
       const style = styles[id];
       assert.deepEqual(xmlStyleWarnings(style, preset.sample), []);
-      const xml = buildTextXml({ W, H, items: [{ text: preset.sample, t: .5, d: 3, style }], fontName: 'NotoSansJP-Black' });
+      const sequence = buildTextXml({ W, H, items: [{ text: preset.sample, t: .5, d: 3, style, bounds: { width: 600, height: style.size } }], fontName: 'NotoSansJP-Black' });
+      const xml = videoTracks(sequence)[0];
       assert.equal((xml.match(/<clipitem /g) || []).length, 1);
       assert.equal((xml.match(/<name>Source Text<\/name>/g) || []).length, 1);
       assert.match(xml, /<mediaSource>GraphicAndType<\/mediaSource>/);
@@ -192,9 +198,9 @@ test('デザインの塗り・フチの未対応グラデーション指定を�
   }
 });
 
-test('17デザインと8演出で書体・サイズ・単色/グラデーション・1〜4本のフチを編集可能な文字へ渡す', () => {
-  assert.equal(Object.keys(DESIGN_VARIANTS).length, 17);
-  assert.equal(Object.keys(XML_PRESETS).length, 8);
+test('20デザインと11演出で書体・サイズ・単色/グラデーション・1〜4本のフチを編集可能な文字へ渡す', () => {
+  assert.equal(Object.keys(DESIGN_VARIANTS).length, 20);
+  assert.equal(Object.keys(XML_PRESETS).length, 11);
   for (const aspect of ['portrait', 'landscape']) for (const fx of Object.keys(XML_PRESETS)) for (const [id, variant] of Object.entries(DESIGN_VARIANTS)) {
     const initial = { ...newDraft(), fx, aspect, text: '編集できるテロップ' };
     const draft = selectDesign(initial, id), style = designStyle(draft);
@@ -206,27 +212,28 @@ test('17デザインと8演出で書体・サイズ・単色/グラデーショ�
     assert.deepEqual(style.fill, variant.style.fill); assert.deepEqual(style.strokes, variant.style.strokes);
     assert.deepEqual(xmlStyleWarnings(style, draft.text), []);
     const [W, H] = aspect === 'landscape' ? [1920, 1080] : [1080, 1920];
-    const xml = buildTextXml({ W, H, items: [{ text: draft.text, t: .5, d: 3, style, fontName: font.postscriptName }], fontName: 'FallbackFont-Regular' });
-    assertEditableStyle(sourceData(xml), style, expectedFont.postscriptName, draft.text);
+    const xml = buildTextXml({ W, H, items: [{ text: draft.text, t: .5, d: 3, style, bounds: { width: 600, height: style.size }, fontName: font.postscriptName }], fontName: 'FallbackFont-Regular' });
+    const main = videoTracks(xml)[0];
+    assertEditableStyle(sourceData(main), style, expectedFont.postscriptName, draft.text);
     if (aspect === 'landscape') assert.deepEqual(style.pos, [960, 900]);
     assert.equal(style.rotate || 0, 0);
-    assert.equal((xml.match(/<clipitem /g) || []).length, 1);
-    assert.equal((xml.match(/<name>Source Text<\/name>/g) || []).length, 1);
+    assert.equal((main.match(/<clipitem /g) || []).length, 1);
+    assert.equal((main.match(/<name>Source Text<\/name>/g) || []).length, 1);
     assert.match(xml, /<effectid>basic<\/effectid>/);
     assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
   }
 });
 
-test('用途別の書体が混在する全17案バッチで各クリップのPostScript名・装飾・時間を保持する', () => {
+test('用途別の書体が混在する全20案バッチで各クリップのPostScript名・装飾・時間を保持する', () => {
   const snapshot = { ...newDraft(), fx: 'xml_reaction', text: '同じ文章で比べます', duration: 2.5 };
   const items = Object.keys(DESIGN_VARIANTS).map((id, i) => {
     const draft = selectDesign(snapshot, id), style = designStyle(draft);
     return { text: draft.text, t: i * (snapshot.duration + 1) + .5, d: snapshot.duration, style, fontName: fontForStyle(draft, style).postscriptName };
   });
-  assert.equal(items.length, 17);
+  assert.equal(items.length, 20);
   assert.equal(new Set(items.map(item => item.fontName)).size, 5, '推奨の5書体を混在させる');
   const before = JSON.stringify(items);
-  const xml = buildTextXml({ name: '全デザイン17案', items, fontName: 'FallbackFont-Regular' });
+  const xml = buildTextXml({ name: '全デザイン20案', items, fontName: 'FallbackFont-Regular' });
   const clips = [...xml.matchAll(/<clipitem\b[\s\S]*?<\/clipitem>/g)].map(match => match[0]);
   assert.equal(clips.length, items.length);
   clips.forEach((clip, i) => {
@@ -237,6 +244,104 @@ test('用途別の書体が混在する全17案バッチで各クリップのPos
   });
   assert.equal(JSON.stringify(items), before);
   assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
+});
+
+test('キラキラ3種は本文のSource Textを変えず、別トラックの編集可能な星へ保存する', () => {
+  for (const [W, H] of [[1920, 1080], [1080, 1920]]) for (const sparkle of SPARKLE_TYPES) {
+    const style = { ...nativeStyles(W > H ? 'landscape' : 'portrait').xml_pop, sparkle };
+    const item = { text: '文字は一度で編集できます', t: .5, d: 3, style, bounds: { width: 580, height: style.size }, fontName: 'NotoSerifJP-Black' };
+    const expected = getSparkleClips({ ...item, W, H });
+    const before = JSON.stringify(item), xml = buildTextXml({ W, H, items: [item], fontName: 'YuGothic-Bold' });
+    assert.equal(JSON.stringify(item), before);
+    const tracks = videoTracks(xml), main = tracks[0];
+    const plain = buildTextXml({ W, H, items: [{ ...item, style: { ...style, sparkle: 'none' } }] });
+    assert.deepEqual(sourceData(main).bytes, sourceData(plain).bytes, '本文を星の装飾用に複製・分解しない');
+    assert.equal(graphicClips(main).length, 1);
+    assertEditableStyle(sourceData(main), style, item.fontName, item.text);
+    assert.equal(tracks.length, expected.length + 1);
+    tracks.slice(1).forEach((track, i) => {
+      const clips = graphicClips(track), particle = expected[i];
+      assert.equal(clips.length, 1);
+      const clip = clips[0], source = sourceData(clip);
+      assertEditableStyle(source, particle.style, 'SegoeUISymbol', particle.text);
+      assert.match(source.text, /^[✦✧]$/u);
+      assert.equal((clip.match(/<name>Source Text<\/name>/g) || []).length, 1);
+      assert.match(clip, /<mediaSource>GraphicAndType<\/mediaSource>/);
+      assert.match(clip, new RegExp(`<start>${particle.startFrame}</start><end>${particle.endFrame}</end>`));
+      assert.match(clip, new RegExp(`<duration>${particle.endFrame - particle.startFrame}</duration>`));
+      const params = [...clip.matchAll(/<parameter authoringApp="PremierePro"><parameterid>(scale|rotation|center|opacity)<\/parameterid>[\s\S]*?<\/parameter>/g)];
+      assert.equal(params.length, 4);
+      for (const [parameter, id] of params) {
+        const keys = [...parameter.matchAll(/<keyframe><when>(\d+)<\/when><value>([\s\S]*?)<\/value><\/keyframe>/g)];
+        for (const [, frame, value] of keys) {
+          const sample = particle.motion[Number(frame)];
+          assert.ok(sample, 'キーフレームは粒子の表示時間内');
+          if (id === 'center') {
+            const [, x, y] = value.match(/<horiz>([^<]+)<\/horiz><vert>([^<]+)<\/vert>/);
+            closeTo(Number(x), (sample.center.x - W / 2) / W, 1e-6);
+            closeTo(Number(y), (sample.center.y - H / 2) / H, 1e-6);
+          } else closeTo(Number(value), sample[id], 1e-6);
+        }
+        if (id === 'opacity') {
+          assert.ok(keys.length >= 2);
+          assert.equal(Number(keys.at(-1)[1]), particle.endFrame - particle.startFrame);
+          assert.equal(Number(keys.at(-1)[2]), 0, '星は本文終了までに消える');
+        }
+      }
+    });
+    assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
+  }
+});
+
+test('キラキラのバッチは本文の時間を保ち、星トラックを重複なしで再利用し全IDを一意にする', () => {
+  const items = SPARKLE_TYPES.map((sparkle, i) => ({ text: `本文${i + 1}`, t: i * 2 + .5, d: 1.5,
+    style: { ...nativeStyles('landscape').xml_pop, sparkle }, bounds: { width: 460 + i * 80, height: 110 },
+    fontName: ['NotoSansJP-Black', 'YuGothic-Bold', 'NotoSerifJP-Black'][i] }));
+  const xml = buildTextXml({ items: [...items].reverse() }), tracks = videoTracks(xml);
+  const expected = items.map(item => getSparkleClips({ ...item, W: 1920, H: 1080 }));
+  assert.equal(tracks.length, Math.max(...expected.map(clips => clips.length)) + 1);
+  const main = graphicClips(tracks[0]); assert.equal(main.length, items.length);
+  main.forEach((clip, i) => assertEditableStyle(sourceData(clip), items[i].style, items[i].fontName, items[i].text));
+  for (let track = 1; track < tracks.length; track++) {
+    const clips = graphicClips(tracks[track]);
+    const particles = expected.map(list => list[track - 1]).filter(Boolean);
+    assert.equal(clips.length, particles.length);
+    let previousEnd = -1;
+    clips.forEach((clip, i) => {
+      const [, from, to] = clip.match(/<start>(\d+)<\/start><end>(\d+)<\/end>/), start = Number(from), end = Number(to);
+      assert.ok(start >= previousEnd); assert.ok(end > start); previousEnd = end;
+      assert.equal(start, particles[i].startFrame); assert.equal(end, particles[i].endFrame);
+    });
+  }
+  const ids = [...xml.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.match(xml, /<sequence[^>]*>\s*<name>[^<]*<\/name><duration>180<\/duration>/);
+  assert.throws(() => buildTextXml({ items: [items[0], { ...items[1], t: .75 }] }), /時間を重ねない/);
+});
+
+test('1フレームと端数の本文でも星が本文の丸め後の区間を超えない', () => {
+  for (const d of [1 / 30, .051, .5, 12]) for (const sparkle of SPARKLE_TYPES) {
+    const item = { text: '短い字幕', t: .017, d, style: { ...nativeStyles('landscape').xml_pop, sparkle }, bounds: { width: 330, height: 110 } };
+    const xml = buildTextXml({ items: [item] });
+    const start = Math.round(item.t * 30), end = Math.round((item.t + d) * 30);
+    for (const track of videoTracks(xml).slice(1)) for (const clip of graphicClips(track)) {
+      const [, from, to] = clip.match(/<start>(\d+)<\/start><end>(\d+)<\/end>/);
+      assert.ok(Number(from) >= start); assert.ok(Number(to) <= end); assert.ok(Number(to) > Number(from));
+    }
+  }
+});
+
+test('未知のキラキラと描画範囲不足は拒否し、なしの場合は既存の本文だけを保存する', () => {
+  const style = nativeStyles('landscape').xml_pop, item = { text: '確認', t: .5, d: 3, style };
+  for (const sparkle of ['unknown', true, false, 0, {}, ['sweep']]) {
+    const invalid = { ...style, sparkle };
+    assert.ok(xmlStyleWarnings(invalid).some(reason => reason.includes('キラキラ')));
+    assert.throws(() => buildTextXml({ items: [{ ...item, style: invalid, bounds: { width: 330, height: 110 } }] }), /キラキラ/);
+  }
+  for (const bounds of [undefined, null, {}, { width: 0, height: 110 }, { width: 330, height: -1 }, { width: Infinity, height: 110 }, { width: 330, height: NaN }, { width: 9000, height: 110 }]) {
+    assert.throws(() => buildTextXml({ items: [{ ...item, style: { ...style, sparkle: 'sweep' }, bounds }] }), /実際の幅と高さ/);
+  }
+  for (const sparkle of [undefined, null, '', 'none']) assert.equal(videoTracks(buildTextXml({ items: [{ ...item, style: { ...style, sparkle } }] })).length, 1);
 });
 
 test('横長のおまかせ位置は全案とも下中央、3案の標準の傾きは0度', () => {

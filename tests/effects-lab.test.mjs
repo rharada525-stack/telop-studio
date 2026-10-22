@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { FX } from '../telop-studio/js/timeline.js';
-import { SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, STORAGE_KEY, DEFAULTS_KEY, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, validateDefaults, fontForStyle } from '../admin/effects-lab/model.mjs';
+import { SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, STORAGE_KEY, DEFAULTS_KEY, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, applyMotionDesign, validateDefaults, fontForStyle } from '../admin/effects-lab/model.mjs';
 import { nativeStyles, XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, variantStyle } from '../admin/effects-lab/native-presets.mjs';
 
 const raw = JSON.parse(await readFile(new URL('../telop-studio/styles.json', import.meta.url)));
@@ -45,8 +45,8 @@ test('ラボはPagesの公開対象の外にあり、本体画面には入口が
 });
 
 
-test('8つの動きと17のデザインを独立して組み合わせても横長の下配置を維持する', () => {
-  assert.equal(Object.keys(XML_PRESETS).length, 8); assert.equal(Object.keys(DESIGN_VARIANTS).length, 17);
+test('11の動きと20のデザインを独立して組み合わせても横長の下配置を維持する', () => {
+  assert.equal(Object.keys(XML_PRESETS).length, 11); assert.equal(Object.keys(DESIGN_VARIANTS).length, 20);
   const motions = new Set();
   for (const [fx, preset] of Object.entries(XML_PRESETS)) for (const design of Object.keys(DESIGN_VARIANTS)) {
     const draft = { ...newDraft(), fx, text: preset.sample, design };
@@ -124,7 +124,7 @@ test('標準デザインJSONに未知の演出や動き指定を混ぜられな�
 
 
 test('用途別9案は色以外の文字組みも異なり、対応する書体と縦横の推奨サイズを持つ', () => {
-  assert.deepEqual(DESIGN_CATEGORIES, { reaction: 'ツッコミ', heading: '見出し', ending: '締め', common: '共通' });
+  assert.deepEqual(DESIGN_CATEGORIES, { luxury: '豪華', reaction: 'ツッコミ', heading: '見出し', ending: '締め', common: '共通' });
   const groups = Object.groupBy(Object.entries(DESIGN_VARIANTS), ([, design]) => design.category);
   assert.equal(groups.common.length, 8);
   for (const category of ['reaction', 'heading', 'ending']) {
@@ -212,4 +212,71 @@ test('用途案と手調整した書体・サイズを試作と標準デザイ�
   const original = JSON.stringify(DESIGN_VARIANTS.heading_news); const copy = variantStyle('heading_news', 'landscape');
   copy.strokes[0].w = 99; copy.size = 22;
   assert.equal(JSON.stringify(DESIGN_VARIANTS.heading_news), original, '見本を外から書き換えない');
+});
+
+
+test('豪華演出の初回だけ推奨デザインを適用し、ユーザー標準を優先する', () => {
+  for (const [fx, kind, design] of [
+    ['xml_sparkle_sweep', 'sweep', 'luxury_gold'],
+    ['xml_sparkle_burst', 'burst', 'luxury_platinum'],
+    ['xml_sparkle_cascade', 'cascade', 'luxury_rose'],
+  ]) {
+    const original = { ...newDraft(), fx, text: '自分の文章で輝かせたい', duration: 4.5, position: 'auto' };
+    const before = JSON.stringify(original), first = applyMotionDesign(original);
+    assert.equal(JSON.stringify(original), before);
+    assert.equal(first.design, design); assert.equal(first.text, original.text); assert.equal(first.duration, 4.5); assert.equal(first.position, 'auto');
+    assert.deepEqual(first.recommendedMotions, [fx]);
+    const style = designStyle(first);
+    assert.equal(style.sparkle, kind); assert.equal(style.rotate || 0, 0);
+    assert.ok(style.size >= 132 && style.size <= 150);
+    assert.ok(style.strokes.length >= 1 && style.strokes.length <= 4);
+    assert.deepEqual(sceneFor(first).items[0].pos, [960, 900]);
+    assert.equal(first.font.postscriptName, FONT_CHOICES[DESIGN_VARIANTS[design].fontChoice].postscriptName);
+    const recolored = selectDesign(first, 'ice');
+    assert.equal(applyMotionDesign(recolored).design, 'ice', '再度選んでも標準未指定の色替えを戻さない');
+    const defaults = { [fx]: captureDesignDefault(selectFont(selectDesign(original, 'rose'), FONT_CHOICES.yu_bold)) };
+    const preferred = applyMotionDesign(original, defaults);
+    assert.equal(preferred.design, 'rose'); assert.equal(preferred.font.postscriptName, 'YuGothic-Bold');
+    assert.deepEqual(preferred.recommendedMotions, [fx]);
+    assert.equal(designStyle(preferred).sparkle, kind);
+  }
+});
+
+test('輝きはデザインや書体を変えても残り、標準デザインには動きを混ぜない', () => {
+  const draft = applyMotionDesign({ ...newDraft(), fx: 'xml_sparkle_burst' });
+  const changed = selectFont(selectDesign(draft, 'ending_thanks'), FONT_CHOICES.noto_bold);
+  assert.equal(designStyle(changed).sparkle, 'burst');
+  for (const aspect of ['portrait', 'landscape']) changed.overrides[aspect].xml_sparkle_burst = { sparkle: 'cascade', size: 128, in: 'drop' };
+  const plain = selectDesign(changed, 'classic');
+  assert.equal(designStyle(plain).sparkle, 'cascade'); assert.equal(designStyle(plain).in, 'drop');
+  const preferred = captureDesignDefault(plain);
+  for (const aspect of ['portrait', 'landscape']) {
+    assert.equal(Object.hasOwn(preferred.overrides[aspect], 'sparkle'), false);
+    assert.equal(Object.hasOwn(preferred.overrides[aspect], 'in'), false);
+  }
+  const otherMotion = { ...newDraft(), fx: 'xml_sparkle_sweep' };
+  const applied = applyDesignDefault(otherMotion, { xml_sparkle_sweep: preferred });
+  assert.equal(designStyle(applied).sparkle, 'sweep');
+  const ordinary = applyDesignDefault(newDraft(), { xml_pop: preferred });
+  assert.equal(designStyle(ordinary).sparkle, undefined);
+  assert.ok(Object.values(DESIGN_VARIANTS).every(variant => !Object.hasOwn(variant.style, 'sparkle')));
+  assert.throws(() => validateDefaults({ kind: 'effects-lab-design-defaults', version: 1,
+    defaults: { xml_sparkle_sweep: { ...preferred, overrides: { landscape: { sparkle: 'burst' } } } } }, names));
+});
+
+test('推奨デザインの初回履歴と豪華演出は保存復元でき、既存演出の選択動作を変えない', () => {
+  const draft = applyMotionDesign({ ...newDraft(), fx: 'xml_sparkle_cascade' });
+  assert.deepEqual(validateDraft(JSON.parse(JSON.stringify(draft)), names), draft);
+  const restored = validateDraft(JSON.parse(JSON.stringify(draft)), names);
+  assert.equal(applyMotionDesign(selectDesign(restored, 'ruby')).design, 'ruby');
+  for (const fx of ['xml_pop', 'xml_reaction', 'xml_heading', 'xml_bounce', 'xml_drop', 'xml_float', 'xml_zoom', 'xml_rise']) {
+    const original = { ...newDraft(), fx, design: 'violet' };
+    assert.equal(applyMotionDesign(original), original);
+    assert.equal(applyMotionDesign(original, { [fx]: captureDesignDefault(selectDesign(original, 'pearl')) }).design, 'pearl');
+  }
+  for (const recommendedMotions of ['xml_sparkle_sweep', ['xml_pop'], ['unknown'], ['xml_sparkle_sweep', 'xml_sparkle_sweep']]) {
+    assert.throws(() => validateDraft({ ...newDraft(), recommendedMotions }, names));
+  }
+  for (const sparkle of ['none', 'sweep', 'burst', 'cascade']) assert.equal(validateStyle({ sparkle }, names).sparkle, sparkle);
+  for (const sparkle of ['unknown', true, 1]) assert.throws(() => validateStyle({ sparkle }, names));
 });

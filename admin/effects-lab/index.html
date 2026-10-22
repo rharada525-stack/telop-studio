@@ -7,7 +7,7 @@
 <title>演出ラボ | テロップスタジオ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=Noto+Serif+JP:wght@900&family=M+PLUS+Rounded+1c:wght@800&family=Shippori+Mincho+B1:wght@800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link href="lab.css?v=20261023-purpose1" rel="stylesheet">
+<link href="lab.css?v=20261023-sparkle1" rel="stylesheet">
 <link href="../../telop-studio/css/font-picker.css?v=20261022-fonts1" rel="stylesheet">
 </head>
 <body>
@@ -63,6 +63,7 @@
     <label>文字色<input id="fill" type="color" value="#ffd84a"></label>
     <div class="two"><label>文字サイズ<input id="size" type="number" min="12" max="400" step="1"></label><label>傾き（度）<input id="rotate" type="number" min="-180" max="180" step="1"></label></div>
     <div class="two"><label>登場<select id="enter"></select></label><label>退場<select id="exit"></select></label></div>
+    <label>キラキラ<select id="sparkle"><option value="none">なし</option><option value="sweep">光が左から走る</option><option value="burst">星が弾ける</option><option value="cascade">星が降ってくる</option></select></label>
     <div class="two"><label>1文字ずつ<select id="character"><option value="">なし</option><option value="pop">ポップ</option><option value="type">タイプ</option><option value="drop">落下</option></select></label><label>文字の間隔（秒）<input id="stagger" type="number" min="0" max="0.3" step="0.005"></label></div>
     <div class="two"><label>表示中<select id="idle"></select></label><label>退場時間（秒）<input id="outDuration" type="number" min="0" max="2" step="0.05"></label></div>
     <details id="advanced"><summary>スタイルJSON</summary><p>選択中のパーツ・縦横だけに適用</p><textarea id="json" spellcheck="false" aria-label="スタイルJSON" rows="14"></textarea><button id="applyJson" type="button" class="ghost">JSONを適用</button></details>
@@ -74,16 +75,16 @@
     <button id="new" type="button" class="ghost">新しい試作</button>
     <hr>
     <h2>Premiere用XML</h2>
-    <small id="nativeNote">Premiereで文字編集・フォント・多重フチを確認済み。演出の文字だけを書き出します。</small>
+    <small id="nativeNote">Premiereで文字編集・フォント・多重フチを確認済み。キラキラは別の装飾トラックになります。</small>
     <small id="xmlSupport" role="status"></small>
     <details><summary>書き出すフォント</summary><input id="xmlFont" type="text" value="NotoSansJP-Black" readonly aria-label="XMLのフォント（PostScript名）"></details>
     <button id="nativeExport" type="button" class="ghost">この演出をXMLに保存</button>
-    <button id="nativeBatch" type="button" class="ghost">動き8案のXMLを保存</button>
+    <button id="nativeBatch" type="button" class="ghost">動き11案のXMLを保存</button>
     <button id="designBatch" type="button" class="ghost">この用途のデザインをXMLに保存</button>
     <button id="exportDefaults" type="button" class="ghost">標準指定をJSONに保存</button>
-    <small>動き8案は選択中のデザイン・書体で保存します。通常字幕・背景・画面効果・効果音は含みません。</small>
+    <small>動きの比較は選択中のデザイン・書体で保存します。通常字幕・背景・画面効果・効果音は含みません。</small>
   </aside>
 </main>
-<script type="module" src="lab.js?v=20261023-purpose1"></script>
+<script type="module" src="lab.js?v=20261023-sparkle1"></script>
 </body>
 </html>

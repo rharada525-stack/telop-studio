@@ -2,11 +2,12 @@ import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-effect
 import { resolveStyles, makeItem } from '../../telop-studio/js/telop.js?v=20261022-effects2';
 import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, validateDefaults, fontForStyle } from './model.mjs?v=20261023-purpose1';
-import { XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-purpose1';
-import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-purpose1';
+import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, applyMotionDesign, validateDefaults, fontForStyle } from './model.mjs?v=20261023-sparkle1';
+import { XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-sparkle1';
+import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-sparkle1';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
+import { getSparkleClips, sampleSparkleAt } from './sparkles.mjs?v=20261023-sparkle1';
 
 const $ = id => document.getElementById(id);
 const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
@@ -21,7 +22,7 @@ let exporting = false;
 const dirtyFields = new Set();
 let styleDirty = false, defaults = {}, cardGeneration = 0, cardsKey = "";
 let designCategory = '', lastDesign = '';
-const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d' };
+const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d', sparkle: 'sparkle' };
 const audioBuffers = new Map();
 const contexts = { original: $('original').getContext('2d'), preview: $('preview').getContext('2d') };
 const controlIds = ['aspect', 'set', 'text', 'subtitle', 'separate', 'duration', 'position', 'screen', 'name'];
@@ -61,7 +62,7 @@ async function init() {
       next.name = `${fx.name === 'なし' ? '画面効果' : fx.name}の試作`;
       // 画面効果だけの初期値。通常字幕はseparateのチェックで隠せる。
       next.screen = key ? 'auto' : 'zoom_lines';
-      savedId = ''; setDraft(applyDesignDefault(next, defaults), true);
+      savedId = ''; setDraft(applyMotionDesign(next, defaults), true);
     };
     $('effects').append(button);
   }
@@ -140,6 +141,7 @@ async function prepare(next) {
     }
     const items = setup.items.filter(item => item.style === '__screen' || renderer.styles[item.style]?.effect || item.text?.trim());
     await renderer.setItems(items);
+    await addSparklePreview(renderer);
     // JSONの描画エラーは採用前に検出し、最後に描けたプレビューを保持する。
     const probe = document.createElement('canvas'); probe.width = renderer.W; probe.height = renderer.H;
     const probeCtx = probe.getContext('2d');
@@ -148,6 +150,37 @@ async function prepare(next) {
   };
   const [original, changed] = await Promise.all([makeRenderer(false), makeRenderer(true)]);
   return { setup, original, changed };
+}
+
+function measuredText(renderer, item) {
+  const outline = Math.max(0, ...(renderer.styles[item.style].strokes || []).map(stroke => stroke.w || 0));
+  return { text: item.text, t: item.t, d: item.d,
+    bounds: { width: item.obj.width() + outline * 2, height: item.obj.height() + outline * 2 },
+    style: { ...renderer.styles[item.style], size: item.obj.block.size, pos: [item.obj.center(), item.obj.centerY()] } };
+}
+
+// 時刻から毎回同じ星を描く。再生・逆方向シーク・XMLで粒子の位置と明るさを共有。
+async function addSparklePreview(renderer) {
+  const clips = renderer.items.filter(item => item.obj?.block).flatMap(item =>
+    getSparkleClips({ ...measuredText(renderer, item), W: renderer.W, H: renderer.H }));
+  if (!clips.length) return;
+  const decorations = await Promise.all(clips.map(async clip => {
+    const style = { ...clip.style, pos: [renderer.W / 2, renderer.H / 2] };
+    const glyph = await makeItem({ text: clip.text, style: 'spark', t: 0, d: clip.d }, { spark: style }, renderer.W, renderer.H, FPS);
+    return { clip, image: glyph.block.compose(0) };
+  }));
+  const drawText = renderer.draw.bind(renderer);
+  renderer.draw = (ctx, time, ...args) => {
+    drawText(ctx, time, ...args);
+    for (const { clip, image } of decorations) {
+      const point = sampleSparkleAt(clip, time);
+      if (!point || point.opacity <= 0) continue;
+      ctx.save(); ctx.globalAlpha = point.opacity / 100;
+      ctx.translate(point.center.x, point.center.y); ctx.rotate(point.rotation * Math.PI / 180);
+      ctx.scale(point.scale / 100, point.scale / 100);
+      ctx.drawImage(image, -image.width / 2, -image.height / 2); ctx.restore();
+    }
+  };
 }
 
 async function setDraft(next, resetTime = false) {
@@ -177,10 +210,11 @@ async function setDraft(next, resetTime = false) {
 function syncStyle() {
   styleDirty = false; dirtyFields.clear();
   const st = prototype.styles[part];
-  const values = { fill: /^#[\da-f]{6}$/i.test(st.fill) ? st.fill : '#ffffff', size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18 };
+  const values = { fill: /^#[\da-f]{6}$/i.test(st.fill) ? st.fill : '#ffffff', size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18, sparkle: st.sparkle || 'none' };
   for (const [id, value] of Object.entries(values)) $(id).value = value;
   for (const id of ['size', 'rotate', 'enter', 'character', 'stagger', 'idle']) $(id).disabled = !!st.group;
   $('fill').disabled = !!st.group || !/^#[\da-f]{6}$/i.test(st.fill);
+  $('sparkle').disabled = !XML_PRESETS[draft.fx] || !!st.group;
   const child = part !== scene.style && prototype.styles[scene.style].group;
   for (const id of ['exit', 'outDuration']) { $(id).disabled = !!child; $(id).title = child ? '退場は「全体（見出し＋本文）」で調整します' : ''; }
   $('json').value = JSON.stringify(st, null, 2);
@@ -191,7 +225,8 @@ function updateXmlControls() {
   const warnings = xmlStyleWarnings(prototype.styles[scene.style], draft.text);
   if (!fontForStyle(draft, prototype.styles[scene.style])) warnings.push('書体を選び直してください');
   $('nativeExport').disabled = exporting || !draft.fx || !draft.text.trim() || !!warnings.length;
-  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の演出から選べます。` : '文字・グラデーション・フチ・動きをXMLに保存できます。';
+  const hasSparkle = prototype.styles[scene.style].sparkle && prototype.styles[scene.style].sparkle !== 'none';
+  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の演出から選べます。` : hasSparkle ? '本文とキラキラを別トラックの編集可能な文字として保存します。' : '文字・グラデーション・フチ・動きをXMLに保存できます。';
 }
 
 function bind() {
@@ -327,8 +362,7 @@ async function exportNative(batch) {
     const renderedItem = (renderer, styleId) => {
       const item = renderer.items.find(item => item.style === styleId);
       if (!item?.obj?.block) throw new Error('単一のテキストを選んでください。');
-      return { text: item.text, t: item.t, d: item.d, style: { ...renderer.styles[styleId],
-        size: item.obj.block.size, pos: [item.obj.center(), item.obj.centerY()] } };
+      return measuredText(renderer, item);
     };
     let items;
     if (batch === 'motions') {
@@ -365,6 +399,7 @@ function persistDefaults(next) {
 }
 function syncDesigns() {
   const native = !!XML_PRESETS[draft.fx];
+  $('nativeBatch').textContent = `動き${Object.keys(XML_PRESETS).length}案のXMLを保存`;
   $('designSection').hidden = !native;
   $('setDefault').disabled = !native; $('resetDefault').disabled = !native || !defaults[draft.fx];
   $('designBatch').disabled = exporting || !native || !!xmlStyleWarnings(prototype.styles[scene.style], draft.text).length;

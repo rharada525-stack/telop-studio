@@ -2,7 +2,7 @@
 import { FX, buildItems } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS, setDesign } from '../../telop-studio/js/sets.js';
 import { designToStyle } from '../../telop-studio/js/design.js';
-import { NATIVE_PRESETS, DESIGN_VARIANTS, DEFAULT_FONT, FONT_CHOICES, nativeStyles, variantStyle } from './native-presets.mjs?v=20261023-purpose1';
+import { NATIVE_PRESETS, DESIGN_VARIANTS, DEFAULT_FONT, FONT_CHOICES, nativeStyles, variantStyle } from './native-presets.mjs?v=20261023-sparkle1';
 export const EFFECTS = { ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, { name: preset.name, style: id }])), ...FX };
 
 export const STORAGE_KEY = 'telop-studio:effects-lab:v1';
@@ -36,6 +36,7 @@ export function validateDraft(value, styleNames) {
   }
   if (value.design != null && value.design !== '' && !Object.hasOwn(DESIGN_VARIANTS, value.design)) throw new Error('不明なデザインです。');
   if (value.font != null) validateFont(value.font);
+  if (value.recommendedMotions != null && (!Array.isArray(value.recommendedMotions) || value.recommendedMotions.length > Object.keys(NATIVE_PRESETS).length || value.recommendedMotions.some(id => !NATIVE_PRESETS[id]?.recommendedDesign) || new Set(value.recommendedMotions).size !== value.recommendedMotions.length)) throw new Error('推奨デザインの適用履歴が不正です。');
   const out = { ...newDraft(), ...structuredClone(value), design: value.design ?? '', font: value.font ?? null, name: value.name.slice(0, 80), overrides: { portrait: {}, landscape: {} } };
   for (const aspect of ['portrait', 'landscape']) {
     for (const [key, st] of Object.entries(value.overrides?.[aspect] || {})) {
@@ -71,6 +72,7 @@ export function validateStyle(st, names) {
   for (const key of ['max_width', 'max_height']) if (st[key] != null && (!Number.isFinite(st[key]) || st[key] < 1 || st[key] > 2400)) throw new Error(`${key}は1〜2400で指定してください。`);
   if (st.group && (!names.includes(st.label_style) || !names.includes(st.body_style))) throw new Error('見出し・本文のスタイルが見つかりません。');
   if (st.pos && (!Array.isArray(st.pos) || st.pos.length !== 2 || !st.pos.every(Number.isFinite))) throw new Error('posは[X, Y]で指定してください。');
+  if (st.sparkle != null && !['none', 'sweep', 'burst', 'cascade'].includes(st.sparkle)) throw new Error('輝きはnone / sweep / burst / cascadeから選んでください。');
   if (st.char && !['pop', 'type', 'drop'].includes(st.char)) throw new Error('1文字の動きはpop / type / dropから選んでください。');
   return st;
 }
@@ -155,6 +157,20 @@ export function applyDesignDefault(draft, defaults) {
     for (const key of appearanceKeys) delete style[key];
     next.overrides[aspect][draft.fx] = { ...style, ...structuredClone(entry.overrides[aspect]) };
   }
+  return next;
+}
+
+// 初めて選ぶ豪華演出には見本のデザインを用意し、ユーザーの標準指定を優先する。
+export function applyMotionDesign(draft, defaults = {}) {
+  const recommended = NATIVE_PRESETS[draft.fx]?.recommendedDesign;
+  if (!recommended) return applyDesignDefault(draft, defaults);
+  const visited = draft.recommendedMotions || [];
+  let next;
+  if (Object.hasOwn(defaults, draft.fx)) next = applyDesignDefault(draft, defaults);
+  else if (!visited.includes(draft.fx)) next = selectDesign(draft, recommended);
+  else return draft;
+  next = structuredClone(next);
+  next.recommendedMotions = [...new Set([...visited, draft.fx])];
   return next;
 }
 

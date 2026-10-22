@@ -19,6 +19,12 @@ export const NATIVE_PRESETS = {
     style: { ...common, fill: '#fff06a', rotate: 0, strokes: [{ w: 7, color: '#202025' }, { w: 12, color: '#ffffff' }, { w: 15, color: '#202025' }], in: 'zoom_in', out: 'fade', out_d: .2 } },
   xml_rise: { name: '下からスライド［XML］', sample: '覚えておきたいポイント', xml: true,
     style: { ...common, fill: '#ffffff', rotate: 0, strokes: [{ w: 8, color: '#12446e' }, { w: 13, color: '#ffffff' }, { w: 16, color: '#142431' }], in: 'slide_up', out: 'fade', out_d: .25 } },
+  xml_sparkle_sweep: { name: '光が走るゴールド［XML］', sample: '輝く未来へ', xml: true, recommendedDesign: 'luxury_gold',
+    style: { ...common, fill: '#ffe59a', rotate: 0, sparkle: 'sweep', strokes: [{ w: 6, color: '#50321a' }, { w: 11, color: '#fff8df' }, { w: 14, color: '#50321a' }], in: 'zoom_in', out: 'fade', out_d: .3 } },
+  xml_sparkle_burst: { name: '祝福のスターバースト［XML］', sample: 'おめでとうございます！', xml: true, recommendedDesign: 'luxury_platinum',
+    style: { ...common, fill: '#fff8df', rotate: 0, sparkle: 'burst', strokes: [{ w: 5, color: '#423c38' }, { w: 10, color: '#fff8df' }, { w: 13, color: '#423c38' }], in: 'pop', out: 'fade', out_d: .3 } },
+  xml_sparkle_cascade: { name: '星が降るフィナーレ［XML］', sample: '最高の瞬間を、あなたに', xml: true, recommendedDesign: 'luxury_rose',
+    style: { ...common, fill: '#ffddc9', rotate: 0, sparkle: 'cascade', strokes: [{ w: 5, color: '#633c36' }, { w: 10, color: '#fff0dc' }, { w: 13, color: '#633c36' }], in: 'fade_up', out: 'fade', out_d: .4 } },
   native_emphasis: { name: '強調・白フチ', sample: 'ここが大事なポイント', style: { ...common, fill: '#ffffff',
     strokes: [{ w: 8, color: '#171a20' }, { w: 15, color: '#ffffff' }, { w: 19, color: '#171a20' }] } },
   native_reaction: { name: 'ツッコミ・赤', sample: 'そこじゃない！', style: { ...common, fill: '#ffffff', rotate: 0,
@@ -35,7 +41,7 @@ export function nativeStyles(aspect) {
 
 // 動きと分けて選べる見た目。元記事の素材は使わず、配色とフチを独自に組む。
 const gradient = (...stops) => ({ stops, angle: 0 });
-export const DESIGN_CATEGORIES = { reaction: 'ツッコミ', heading: '見出し', ending: '締め', common: '共通' };
+export const DESIGN_CATEGORIES = { luxury: '豪華', reaction: 'ツッコミ', heading: '見出し', ending: '締め', common: '共通' };
 const outline = (inner, edge, width = 8) => [{ w: width, color: inner }, { w: width + 5, color: '#ffffff' }, { w: width + 8, color: edge }];
 export const DESIGN_VARIANTS = {
   classic: { category: 'common', name: '王道イエロー', tag: 'くっきり', style: { fill: '#fff06a', strokes: outline('#202025', '#202025', 7) } },
@@ -74,6 +80,16 @@ export const DESIGN_VARIANTS = {
   ending_action: { category: 'ending', name: '次の一歩へ', tag: '力強いゴシック・白フチ', fontChoice: 'noto_black', sample: 'ぜひ試してみてください',
     aspectStyle: { portrait: { size: 106, max_width: 970 }, landscape: { size: 128, max_width: 1540 } },
     style: { fill: gradient('#faffdd', '#c3ffb0', '#5ad5a1'), strokes: [{ w: 3, color: '#ffffff' }, { w: 8, color: '#164d42' }, { w: 11, color: '#ffffff' }] } },
+
+  luxury_gold: { category: 'luxury', name: 'プレミアムゴールド', tag: '極太ゴシック・濃淡の金属光沢', fontChoice: 'noto_black', sample: '輝く未来へ',
+    aspectStyle: { portrait: { size: 120, max_width: 950 }, landscape: { size: 140, max_width: 1540 } },
+    style: { fill: gradient('#fffbe0', '#ffe9a0', '#c48b23', '#fff2b8', '#e0a83d', '#a96a16'), strokes: [{ w: 4, color: '#54321c' }, { w: 9, color: gradient('#fff9ce', '#ce953b', '#fff4bb', '#b67723') }, { w: 12, color: '#fff8e4' }, { w: 16, color: '#54321c' }] } },
+  luxury_platinum: { category: 'luxury', name: '白金の祝福', tag: '極太明朝・白金と金の重なり', fontChoice: 'noto_serif', sample: 'おめでとうございます！',
+    aspectStyle: { portrait: { size: 122, max_width: 960 }, landscape: { size: 144, max_width: 1560 } },
+    style: { fill: gradient('#ffffff', '#f7f3e8', '#cfcccb', '#fffef3', '#e2d7bc'), strokes: [{ w: 3, color: '#454344' }, { w: 8, color: gradient('#fff4c7', '#c5a05e', '#fff7da', '#ae8147') }, { w: 11, color: '#ffffff' }, { w: 14, color: '#454344' }] } },
+  luxury_rose: { category: 'luxury', name: 'ロゼの余韻', tag: '細めの明朝・温かい金属光沢', fontChoice: 'yu_mincho', sample: '最高の瞬間を、あなたに',
+    aspectStyle: { portrait: { size: 112, max_width: 960 }, landscape: { size: 132, max_width: 1580 } },
+    style: { fill: gradient('#fff9e8', '#ffd8bf', '#ba7c67', '#ffe9cd', '#d29a7e'), strokes: [{ w: 3, color: '#633c36' }, { w: 7, color: gradient('#fff3de', '#d5aa7e', '#fff1d0', '#ba895d') }, { w: 11, color: '#633c36' }] } },
 };
 export const FONT_CHOICES = {
   noto_black: { name: 'Noto Sans JP・極太', family: 'Noto Sans JP', weight: 900, postscriptName: 'NotoSansJP-Black' },
