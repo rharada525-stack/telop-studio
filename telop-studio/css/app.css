@@ -248,6 +248,9 @@ body.busy #step1, body.busy #step3, body.busy #stepDesign, body.busy #stepAudio,
   .card { padding: 28px; }
   td textarea { min-height: 100px; font-size: 15px; }
 }
+@media (min-width: 601px) {
+  body:not(.landscape) #cutReviewPlayer canvas { height: clamp(235px, 36vh, 340px); }
+}
 @media (max-width: 1100px) and (min-width: 881px) {
   .layout, body.landscape .layout { grid-template-columns: minmax(270px, .55fr) minmax(0, 1fr); gap: 12px; padding: 12px; }
   .stage { padding: 12px; gap: 12px; }
