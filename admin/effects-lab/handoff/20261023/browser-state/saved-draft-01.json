@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "見出し「その1/本文」の試作",
+  "fx": "point",
+  "aspect": "portrait",
+  "set": "standard",
+  "design": "",
+  "font": null,
+  "text": "その1/まずは{結論}から",
+  "subtitle": "字幕と演出の重なりも確認できます",
+  "separate": true,
+  "position": "auto",
+  "screen": "auto",
+  "duration": 3,
+  "overrides": {
+    "portrait": {},
+    "landscape": {}
+  }
+}

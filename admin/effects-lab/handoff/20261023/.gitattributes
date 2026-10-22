@@ -1,0 +1,5 @@
+# Preserve transfer checksums across Windows and macOS checkouts.
+* text=auto eol=lf
+*.prproj -text
+*.png -text
+*.jpg -text

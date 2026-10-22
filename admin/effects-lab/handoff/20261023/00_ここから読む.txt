@@ -1,0 +1,119 @@
+テロップスタジオ・演出ラボ　別PCへの引き継ぎ
+作成日: 2026-10-23
+
+最初にこのファイル、次に 01_次のCodexへ.txt を読んでください。
+仕様・実機検証・未確認事項の詳細: ../../README.md
+
+■ Gitの状態
+作業ブランチ: effects/premiere-editable
+実装完了地点: 301253f（引き継ぎ文書・受け渡しファイルの追加はこの後）
+2026-10-23、GitHubは403「Your account is suspended」を返しており、
+今回の実装をリモートへpushできていません。GitHubの内容だけでは最新版が揃いません。
+同梱のGit bundleから作業ブランチを復元してください。
+復旧後にこのブランチをpushする必要があります。mainへはマージしません。
+
+■ 受け渡し物
+telop-studio-effects-20261023.bundle  : Git履歴と作業ブランチ
+telop-studio-handoff-20261023.zip     : bundleと作業ファイル一式を含む受け渡しZIP
+ZIPを新しいフォルダーへ展開し、その中のbundleからcloneできます。
+Gitを使わず見る場合はZIP内のsource/がリポジトリ直下に対応します。
+ブラウザ内の試作・標準指定・元動画・背景素材は、Gitのcloneだけでは移りません。
+同梱のJSONを使って復元し、元動画や背景素材が必要なら別途読み込んでください。
+
+■ 必要な環境
+Windows、Git、Python 3、Node.js、Premiere Pro 2026（標準トランジションは26.0以降）。
+確認済み: Node.js v24.14.1 / Python 3.14.3 / Git 2.55.0.windows.3。
+PowerShellで python / node / git が使える状態にします。
+ブラウザのWebフォント初回取得にはインターネット接続が必要です。
+Premiereで使うフォントはPC側にもインストールします。フォント本体は同梱していません。
+  Noto Sans JP Black / Bold（NotoSansJP-Black / NotoSansJP-Bold）
+  Noto Serif JP Black（NotoSerifJP-Black）
+  游ゴシック Bold（YuGothic-Bold）、游明朝 Demibold（YuMincho-Demibold）
+  Segoe UI Symbol（SegoeUISymbol。星の✦／✧に使用）
+括弧内はXMLへ渡すPostScript名です。表示用のフォント名から推測しないでください。
+
+■ 次のPCで開く
+1. bundleを置いたフォルダーでPowerShellを開き、次を実行します。
+
+   git clone --branch effects/premiere-editable .\telop-studio-effects-20261023.bundle telop-studio
+   cd telop-studio
+   git remote set-url origin https://github.com/rharada525-stack/telop-studio.git
+   git status --short --branch
+   git log -1 --oneline
+   node --test tests/*.test.mjs
+
+   引き継ぎ時点は127テスト成功。既存の作業フォルダーを上書きしないでください。
+   ZIPを使う場合は新しいフォルダーへ展開します。Git履歴の復元にはbundleを使います。
+
+2. リポジトリ直下で起動します。
+
+   .\admin\effects-lab\Start-Lab.ps1
+
+   http://127.0.0.1:8767/admin/effects-lab/ をブラウザで開きます。
+   スクリプトはPythonのHTTPサーバーを127.0.0.1だけに起動します。
+   PowerShellは開いたまま使用し、終了はCtrl+C。
+   ポートが使用中なら -Port 8768 などを付け、表示されたURLを開きます。
+
+3. 「文字に光が走る」「光と宝石のフィナーレ」を選び、横長・下配置、
+   デザイン切替、再生・逆シークを確認します。保存JSONがあれば読み込みます。
+   「標準指定」のJSONも「JSONを読み込む」から復元できます。
+
+4. XMLをPremiereの新しい検証プロジェクトへ読み込みます。
+   表面光付きは「本文を編集_…」シーケンス内の文字を1か所で変更すると、
+   原色と光沢の両層へ反映されます。変更・取り消しを確認し、元の作品は保護します。
+   標準ネオン／ライトスイープは admin/effects-lab/samples/premiere-native-light.prproj
+   を開きます。これはPremiere本体で保存したサンプルです。
+
+■ GitHub復旧後
+今回のブランチがpushされていることを確認できた後なら、次でも取得できます。
+  git clone --branch effects/premiere-editable https://github.com/rharada525-stack/telop-studio.git
+bundleから再開した作業は復旧後に effects/premiere-editable へpushします。
+mainへのマージ・公開版への反映は別の依頼として扱います。
+
+■ 現在の到達点と進め方
+ローカル管理者ラボに15種類の動き、22種類のデザインがあります。
+横長は基本下中央、傾き0度。動きとデザイン・書体を分けて選べます。
+本文はPremiereで編集できるテキスト。MP4・字幕画像・MOGRTへ置き換えません。
+キラキラは別トラックの編集可能な星文字、表面光は本文1個を共有したネストです。
+今後は用途別の見た目やリッチなデザインを追加し、ユーザーが良い案を最終標準に選びます。
+「この動きの標準にする」はこのPCのラボ内の指定で、公開版は変わりません。
+ラボはadmin/effects-lab/にあり、GitHub Pagesの公開対象telop-studio/の外です。
+
+■ 既知の制限
+PremiereのSource Text形式は公開仕様ではないため、版が変われば再確認が必要です。
+全書体・縦横・全フレームの完全一致を実機確認したわけではありません。
+文章の幅を大きく変更すると、星の位置や光沢帯のCrop調整が必要な場合があります。
+Premiere標準のネオンワイプ／ライトスイープはFCP7 XMLで保持できないため、
+専用の本体保存.prprojで渡します。検証範囲・未対応表現は../../README.mdを参照。
+
+■ 同梱ファイルの詳細（この引き継ぎフォルダーからの相対パス）
+premiere/Premiere-effects-workbench.prproj
+  Premiere本体で保存した検証作業プロジェクト。15シーケンス入りです。
+  最新の比較は「演出ラボ_動き15案」。過去の検証や光沢の本文シーケンスも含みます。
+  原本は保持し、次PCでは別名保存して続けてください。
+  保存した完成版の別PC再オープンは、移行先で確認する項目です。
+premiere/effects-15-motion.xml
+  ラボから保存して実機読み込み済みの15演出比較。Noto Serif JP Blackと星を使用。
+  45:02付近が二度弾ける星、57:08〜57:23が表面光＋星の確認箇所です。
+../../samples/premiere-native-light.prproj
+  標準ネオンワイプ／ライトスイープの2本文を含む小さな見本。
+  本体保存・再オープン・ネオン側の本文編集とUndoを確認済みです。
+  上記3ファイルに外部動画・画像の素材参照はありません。
+  prprojには元PCの保存先パスがメタデータとして残りますが、素材のリンク先ではありません。
+browser-state/design-defaults.json
+  現在の動き別の標準指定（ツッコミ・スラム＝ビックリ警報、強調・ポップ＝キャンディピンク）。
+browser-state/current-draft.json
+  移行準備時に編集中だった「バウンド［XML］の試作」。
+browser-state/saved-draft-01.json〜saved-draft-03.json
+  保存した試作3件。ラボの「JSONを読み込む」→「別の試作として保存」で1件ずつ復元。
+  標準指定JSONも同じ入口から読み込みます。最後にcurrent-draft.jsonを読み込めば続きになります。
+  既に移行先に同名の試作がある場合は、内容を確認して重複保存を避けてください。
+reference/effects-lab.jpg、reference/premiere-text-edited.png
+  前PCで確認したラボ画面と、Premiereで文字を書き換えた実機画面。
+checksums.sha256
+  このフォルダーと標準ネオン見本のSHA-256一覧。改変・転送漏れの確認用です。
+
+同梱対象は演出ラボの開発・検証データです。元のMOV、ブラウザの動画編集プロジェクト、
+AIモデルのキャッシュ、インストール済みフォントは含めていません。
+Git履歴には以前から追跡済みの小さなテスト動画・効果音を含みます。
+新規10コミットの履歴と今回の追加素材を点検しています。過去の全履歴を再監査したものではありません。

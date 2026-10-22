@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "バウンド［XML］の試作",
+  "fx": "xml_bounce",
+  "aspect": "landscape",
+  "set": "standard",
+  "design": "reaction_alarm",
+  "font": {
+    "family": "Noto Sans JP",
+    "weight": 900,
+    "postscriptName": "NotoSansJP-Black"
+  },
+  "text": "やればできる！",
+  "subtitle": "字幕と演出の重なりも確認できます",
+  "separate": false,
+  "position": "auto",
+  "screen": "auto",
+  "duration": 3,
+  "overrides": {
+    "portrait": {
+      "xml_bounce": {},
+      "xml_reaction": {},
+      "xml_pop": {}
+    },
+    "landscape": {
+      "xml_bounce": {},
+      "xml_sparkle_cascade": {
+        "sparkle": "cascade"
+      },
+      "xml_reaction": {},
+      "xml_pop": {}
+    }
+  },
+  "recommendedMotions": [
+    "xml_sparkle_sweep",
+    "xml_sparkle_burst",
+    "xml_sparkle_cascade",
+    "xml_sparkle_celebration",
+    "xml_sparkle_twinkle",
+    "xml_surface_double",
+    "xml_surface_sweep"
+  ]
+}

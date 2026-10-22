@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "name": "動作確認・見出し",
+  "fx": "point",
+  "aspect": "landscape",
+  "set": "standard",
+  "design": "",
+  "font": null,
+  "text": "その1/まずは{結論}から",
+  "subtitle": "字幕と演出の重なりも確認できます",
+  "separate": true,
+  "position": "auto",
+  "screen": "auto",
+  "duration": 3,
+  "overrides": {
+    "portrait": {
+      "point_body": {
+        "font": "NotoSansJP-Black.otf",
+        "size": 42,
+        "max_width": 760,
+        "fill": "#1b1b1b",
+        "strokes": [],
+        "plate": {
+          "type": "slant",
+          "skew": 0.22,
+          "fill": [
+            "#ffffff",
+            "#ececec"
+          ],
+          "pad": [
+            46,
+            22
+          ],
+          "bar": {
+            "h": 10,
+            "color": "#ff4766"
+          },
+          "shadow": {
+            "dx": 0,
+            "dy": 10,
+            "blur": 10,
+            "color": "#00000066"
+          }
+        },
+        "plate_anim": "wipe",
+        "char": "type",
+        "char_delay": 0.16,
+        "stagger": 0.03,
+        "in": "none",
+        "idle": "none",
+        "rotate": 0
+      }
+    },
+    "landscape": {}
+  }
+}

@@ -1,5 +1,7 @@
 # 演出ラボ（ローカル管理者用）
 
+別PCへの引き継ぎは [00_ここから読む.txt](handoff/20261023/00_ここから読む.txt) から開始してください。GitHubへの送信状況・Premiere検証データ・ブラウザ保存JSONの復元方法をまとめています。
+
 PowerShellで `./admin/effects-lab/Start-Lab.ps1` を実行し、表示されたURLを開きます。Python 3が必要です。
 標準URL: `http://127.0.0.1:8767/admin/effects-lab/`。終了はサーバーの画面で Ctrl+C。
 

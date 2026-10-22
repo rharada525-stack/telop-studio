@@ -1,0 +1,30 @@
+{
+  "kind": "effects-lab-design-defaults",
+  "version": 1,
+  "defaults": {
+    "xml_reaction": {
+      "design": "reaction_alarm",
+      "font": {
+        "family": "Noto Sans JP",
+        "weight": 900,
+        "postscriptName": "NotoSansJP-Black"
+      },
+      "overrides": {
+        "portrait": {},
+        "landscape": {}
+      }
+    },
+    "xml_pop": {
+      "design": "rose",
+      "font": {
+        "family": "Noto Sans JP",
+        "weight": 900,
+        "postscriptName": "NotoSansJP-Black"
+      },
+      "overrides": {
+        "portrait": {},
+        "landscape": {}
+      }
+    }
+  }
+}
