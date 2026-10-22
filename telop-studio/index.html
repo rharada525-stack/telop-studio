@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Zen+Maru+Gothic:wght@500;700;900&family=Dela+Gothic+One&family=Kosugi+Maru&family=BIZ+UDPGothic:wght@400;700&family=Noto+Serif+JP:wght@700;900&family=Shippori+Mincho+B1:wght@700;800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=20261022-copy1">
+<link rel="stylesheet" href="css/app.css?v=20261022-original-theme1">
 </head>
 <body>
 <header class="topbar">
@@ -22,8 +22,16 @@
 
 <main class="layout">
   <section class="stage">
-    <div class="phone"><canvas id="preview" width="1080" height="1920"></canvas>
-      <div id="dropHint" class="drop-hint">ここに動画をドロップ</div>
+    <label class="preview-format">出力の形
+      <select id="selAspect">
+        <option value="portrait">縦 9:16（ショート・リール・TikTok）</option>
+        <option value="landscape">横 16:9（YouTube など）</option>
+      </select>
+    </label>
+    <div class="preview-viewport">
+      <div class="phone"><canvas id="preview" width="1080" height="1920"></canvas>
+        <div id="dropHint" class="drop-hint">ここに動画をドロップ</div>
+      </div>
     </div>
     <div class="transport">
       <button id="btnPlay" class="round" disabled aria-label="再生">▶</button>
@@ -33,7 +41,16 @@
   </section>
 
   <section class="panel">
-    <div class="card" id="step1">
+    <div class="workspace-nav" role="tablist" aria-label="テロップスタジオ">
+      <button id="tabSource" type="button" role="tab" aria-controls="step1" aria-selected="true"><span class="num">1</span>素材を選ぶ</button>
+      <button id="tabAnalyze" type="button" role="tab" aria-controls="step2" aria-selected="false" tabindex="-1"><span class="num">2</span>自動カット＋文字起こし</button>
+      <button id="tabCaptions" type="button" role="tab" aria-controls="step3" aria-selected="false" tabindex="-1"><span class="num">3</span>テロップを直す</button>
+      <button id="tabDesign" type="button" role="tab" aria-controls="stepDesign" aria-selected="false" tabindex="-1"><span class="num">4</span>字幕のデザイン</button>
+      <button id="tabAudio" type="button" role="tab" aria-controls="stepAudio" aria-selected="false" tabindex="-1"><span class="num">5</span>音のバランス</button>
+      <button id="tabExport" type="button" role="tab" aria-controls="step4" aria-selected="false" tabindex="-1"><span class="num">6</span>書き出す</button>
+    </div>
+    <div class="panel-views">
+    <div class="card" id="step1" role="tabpanel" aria-labelledby="tabSource" tabindex="0">
       <h2><span class="num">1</span>素材を選ぶ</h2>
       <label class="dropzone" id="dropzone">
         <input id="inpVideo" type="file" accept="video/*" multiple hidden>
@@ -46,21 +63,15 @@
           <label>プロジェクトを選ぶ<select id="selSave"></select></label>
           <button id="btnOpenSave" class="ghost" type="button">続きから開く</button>
         </div>
-        <button id="btnDeleteSave" class="ghost project-delete" type="button">選択したプロジェクトを削除</button>
         <label class="save-name">プロジェクト名<input id="inpSaveName" type="text" maxlength="60"></label>
         <div class="save-actions">
           <button id="btnNewSave" class="ghost" type="button">新しく始める</button>
           <button id="btnCopySave" class="ghost" type="button">プロジェクトを複製</button>
         </div>
         <p class="status" id="projectStatus" role="status"></p>
+        <button id="btnDeleteSave" class="ghost project-delete" type="button">選択したプロジェクトを削除</button>
       </section>
       <div class="source-settings">
-        <label>出力の形
-          <select id="selAspect">
-            <option value="portrait">縦 9:16（ショート・リール・TikTok）</option>
-            <option value="landscape">横 16:9（YouTube など）</option>
-          </select>
-        </label>
         <label>画面の合わせ方
           <select id="selLayout">
             <option value="auto">おまかせ（素材ごとに自動）</option>
@@ -82,7 +93,7 @@
       </div>
     </div>
 
-    <div class="card" id="step2">
+    <div class="card" id="step2" role="tabpanel" aria-labelledby="tabAnalyze" tabindex="0" hidden>
       <h2><span class="num">2</span>自動カット＋文字起こし</h2>
       <div class="row">
         <label>文字起こしモード
@@ -122,12 +133,14 @@
       <button id="btnCutEditor" class="ghost small" type="button" disabled>タイムラインでカットを編集</button>
     </div>
 
-    <div class="card grow" id="step3">
+    <div class="card grow" id="step3" role="tabpanel" aria-labelledby="tabCaptions" tabindex="0" hidden>
+      <div class="caption-heading">
       <h2><span class="num">3</span>テロップを直す</h2>
       <div class="edit-toolbar" aria-label="編集の取り消しと初期化">
         <button id="btnUndoEdit" class="ghost" type="button" title="元に戻す（Ctrl+Z / ⌘Z）" disabled>↶ 元に戻す</button>
         <button id="btnRedoEdit" class="ghost" type="button" title="やり直す（Ctrl+Shift+Z / Ctrl+Y / ⌘⇧Z）" disabled>↷ やり直す</button>
         <button id="btnResetSubtitles" class="ghost" type="button" disabled>字幕をすべて初期化</button>
+      </div>
       </div>
       <p class="status edit-status" id="editStatus" role="status"></p>
       <div class="auto-bar">
@@ -148,7 +161,7 @@
         <label class="hl-switch"><input id="chkHighlight" type="checkbox" checked> 字幕の大事な言葉を自動で強調色にする（数字・「実は」「一番」など）</label>
         <p class="status" id="autoStatus">字幕の言葉から、見出し・ツッコミ・ズーム・強調色などを自動で付けます。手で設定した行はそのままです。</p>
       </div>
-      <p class="hint">文字は直接書き換えられます。<b>{ }</b> で囲むと強調色。演出を選んで文字を空のままにすると、その字幕自体が演出テロップになります。「画面効果」は演出なしの行にも付けられます。「カット」にチェックすると、その部分の映像ごと削除します。</p>
+      <details class="caption-help"><summary>文字は直接書き換えられます。</summary><p class="hint"><b>{ }</b> で囲むと強調色。演出を選んで文字を空のままにすると、その字幕自体が演出テロップになります。「画面効果」は演出なしの行にも付けられます。「カット」にチェックすると、その部分の映像ごと削除します。</p></details>
       <div class="table-wrap">
         <table id="lines">
           <thead><tr><th>時間</th><th>字幕</th><th>演出（種類・文字・位置）</th><th>画面効果</th><th>カット</th></tr></thead>
@@ -158,8 +171,8 @@
       <button id="btnAddLine" class="ghost small" disabled>＋ 今の位置に字幕を追加</button>
     </div>
 
-    <details class="card" id="stepDesign">
-      <summary><h2><span class="num">4</span>字幕のデザイン</h2><span class="hint">クリックで開く</span></summary>
+    <div class="card" id="stepDesign" role="tabpanel" aria-labelledby="tabDesign" tabindex="0" hidden>
+      <h2><span class="num">4</span>字幕のデザイン</h2>
       <div class="speaker-bar">
         <div id="speakerBar" class="sp-tabs"></div>
         <label class="sp-name">名前 <input id="inpSpeakerName" type="text" maxlength="20"></label>
@@ -174,9 +187,9 @@
         <button id="btnDesignReset" class="ghost small" type="button">初期設定に戻す</button>
       </div>
       <p class="status" id="designStatus"></p>
-    </details>
+    </div>
 
-    <div class="card" id="stepAudio">
+    <div class="card" id="stepAudio" role="tabpanel" aria-labelledby="tabAudio" tabindex="0" hidden>
       <h2><span class="num">5</span>音のバランス</h2>
       <label class="check"><input id="chkVoiceAuto" type="checkbox" checked> 声の大きさを自動でそろえる（小さい声も聞きやすく）</label>
       <label class="slider">声の音量 <span id="voiceVal" class="mono">100%</span>
@@ -187,7 +200,7 @@
       </label>
     </div>
 
-    <div class="card" id="step4">
+    <div class="card" id="step4" role="tabpanel" aria-labelledby="tabExport" tabindex="0" hidden>
       <h2><span class="num">6</span>書き出す</h2>
       <div class="row">
         <button id="btnExport" class="primary" disabled>MP4 を書き出す</button>
@@ -205,6 +218,7 @@
         <button id="btnPremiere" class="primary" disabled>Premiere 用に書き出す（ZIP）</button>
         <p class="status" id="prStatus">ZIP は元の動画と同じフォルダに展開してから、Premiere で中の XML を読み込みます。</p>
       </div>
+    </div>
     </div>
   </section>
 </main>
@@ -256,6 +270,6 @@
   </form>
 </dialog>
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.3/dist/mp4box.all.min.js"></script>
-<script type="module" src="js/app.js?v=20261022-copy1"></script>
+<script type="module" src="js/app.js?v=20261022-workspace1"></script>
 </body>
 </html>
