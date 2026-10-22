@@ -1,8 +1,10 @@
 import { Renderer, FPS } from '../../telop-studio/js/render.js';
 import { resolveStyles } from '../../telop-studio/js/telop.js';
-import { FX, FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
+import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs';
+import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs';
+import { NATIVE_PRESETS, nativeStyles } from './native-presets.mjs';
+import { unsupported, buildNativeProject, compressProject } from './native-project.mjs';
 
 const $ = id => document.getElementById(id);
 const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
@@ -13,6 +15,7 @@ let raw, base, draft, scene, baseline, prototype, generation = 0, timer, prepari
 let saved = [], savedId = '', part = '', t = 0, playing = false, lastTick = 0, animation, playbackRun = 0;
 let media = null, mediaURL = '', mediaGeneration = 0, background;
 let audioContext, audioNodes = [], audioGeneration = 0;
+let nativeSeed;
 let styleDirty = false;
 const styleFields = { size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d' };
 const audioBuffers = new Map();
@@ -37,7 +40,9 @@ async function init() {
   $('lab').hidden = false;
   const response = await fetch('../../telop-studio/styles.json', { cache: 'no-store' });
   if (!response.ok) throw new Error('styles.jsonを読み込めません');
-  raw = await response.json(); base = resolveStyles(raw);
+  raw = await response.json();
+  raw = { ...raw, ...nativeStyles('portrait'), _landscape: { ...raw._landscape, ...nativeStyles('landscape') } };
+  base = resolveStyles(raw);
   options('set', Object.fromEntries(Object.entries(DESIGN_SETS).map(([key, item]) => [key, item.name])));
   options('position', FX_POS); options('screen', SCREEN);
   options('enter', enters); options('exit', exits); options('idle', idles);
@@ -149,6 +154,9 @@ function syncStyle() {
   const child = part !== scene.style && prototype.styles[scene.style].group;
   for (const id of ['exit', 'outDuration']) { $(id).disabled = !!child; $(id).title = child ? '退場は「全体（見出し＋本文）」で調整します' : ''; }
   $('json').value = JSON.stringify(st, null, 2);
+  const reasons = unsupported(prototype.styles[scene.style]);
+  $('nativeExport').disabled = !!reasons.length;
+  $('nativeNote').textContent = reasons.length ? `この試作の未対応項目: ${reasons.join('、')}。下の3案で文字の編集を確認できます。` : '静止デザインの検証用。Premiereで読み込み・文字編集の確認が必要です。';
 }
 
 function bind() {
@@ -200,6 +208,8 @@ function bind() {
     prototype.draw(clean.getContext('2d'), t, source(), 'auto');
     clean.toBlob(blob => { if (blob) download(blob, `演出テスト-${draft.fx || 'screen'}-${Math.round(t * FPS)}f.png`); });
   };
+  $('nativeExport').onclick = () => exportNative(false);
+  $('nativeBatch').onclick = () => exportNative(true);
   $('save').onclick = async () => {
     if (!await setDraft(readControls())) return;
     const id = savedId || crypto.randomUUID();
@@ -235,6 +245,25 @@ function bind() {
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
   window.addEventListener('pagehide', () => { stop(); if (mediaURL) URL.revokeObjectURL(mediaURL); audioContext?.close(); });
+}
+
+async function exportNative(batch) {
+  try {
+    if (!await setDraft(readControls())) return;
+    const W = prototype.W, H = prototype.H;
+    if (!nativeSeed) { const response = await fetch('native-seed.json'); if (!response.ok) throw new Error('標準テキストの構造を読み込めません。'); nativeSeed = await response.json(); }
+    const rendered = batch ? await Promise.all(Object.entries(NATIVE_PRESETS).map(async ([id, preset], index) => {
+      const renderer = new Renderer(base, raw); renderer.setFormat(draft.aspect);
+      await renderer.setItems([{ style: id, text: preset.sample, t: index * 4 + .5, d: 3 }]);
+      return { item: renderer.items[0], style: renderer.styles[id] };
+    })) : prototype.items.filter(item => item.style === scene.style).map(item => ({ item, style: prototype.styles[item.style] }));
+    const items = rendered.map(({ item, style }) => ({ text: item.text, t: item.t, d: item.d, style,
+      pos: [item.obj.center() - item.obj.width() / 2, item.obj.centerY() + style.size * .38] }));
+    const name = batch ? '演出ラボ_標準テキスト3案_検証用' : `${draft.name}_標準テキスト_検証用`;
+    const xml = buildNativeProject(nativeSeed, { name, W, H, items });
+    download(await compressProject(xml), `${name.replace(/[\\/:*?"<>|]/g, '_')}.prproj`);
+    status('標準テキストの検証用.prprojを保存しました。Premiereで読み込み・文字編集を確認してください。動きの書き出しは未対応です。');
+  } catch (error) { status(`Premiere用データを保存できません: ${error.message}`, true); }
 }
 
 function renderSaved() {

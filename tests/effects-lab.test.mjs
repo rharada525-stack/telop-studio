@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { FX } from '../telop-studio/js/timeline.js';
 import { SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, STORAGE_KEY } from '../admin/effects-lab/model.mjs';
+import { nativeStyles } from '../admin/effects-lab/native-presets.mjs';
 
 const raw = JSON.parse(await readFile(new URL('../telop-studio/styles.json', import.meta.url)));
-const names = Object.keys(raw).filter(key => !key.startsWith('_'));
+const names = [...Object.keys(raw).filter(key => !key.startsWith('_')), ...Object.keys(nativeStyles('portrait'))];
 
 test('全演出・全デザインセット・縦横を本体の時刻とスタイルで試せる', () => {
   for (const aspect of ['portrait', 'landscape']) for (const set of ['standard', 'entertainment', 'business']) for (const fx of Object.keys(FX)) {

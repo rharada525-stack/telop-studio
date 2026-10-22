@@ -2,9 +2,12 @@
 import { FX, buildItems } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS, setDesign } from '../../telop-studio/js/sets.js';
 import { designToStyle } from '../../telop-studio/js/design.js';
+import { NATIVE_PRESETS } from './native-presets.mjs';
+export const EFFECTS = { ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, { name: preset.name, style: id }])), ...FX };
 
 export const STORAGE_KEY = 'telop-studio:effects-lab:v1';
 export const SAMPLES = {
+  ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, preset.sample])),
   keyword: 'ここが{大事なポイント}', hook: '実は{逆効果}でした',
   tsukkomi: 'なんでやねん！', tsukkomi_green: 'それは知らなかった！',
   point: 'その1/まずは{結論}から', reveal: 'まさかの{大成功}！',
@@ -23,7 +26,7 @@ export function newDraft() {
 
 // JSONは試作専用の形式だけを受け入れ、公開用のプロジェクトと混ぜない。
 export function validateDraft(value, styleNames) {
-  if (!value || value.version !== 1 || typeof value.name !== 'string' || !Object.hasOwn(FX, value.fx) ||
+  if (!value || value.version !== 1 || typeof value.name !== 'string' || !Object.hasOwn(EFFECTS, value.fx) ||
       !['portrait', 'landscape'].includes(value.aspect) || !Object.hasOwn(DESIGN_SETS, value.set) ||
       typeof value.separate !== 'boolean' || typeof value.text !== 'string' || value.text.length > 300 || typeof value.subtitle !== 'string' || value.subtitle.length > 300 ||
       !Number.isFinite(value.duration) || value.duration < 0.5 || value.duration > 12 ||
@@ -73,12 +76,14 @@ export function validateStyle(st, names) {
 export function sceneFor(draft) {
   const start = 0.5, end = start + draft.duration, total = end + 0.7;
   const design = setDesign(draft.set);
+  const native = Object.hasOwn(NATIVE_PRESETS, draft.fx);
   const settings = { aspect: draft.aspect, autoHighlight: false, fxMap: DESIGN_SETS[draft.set].fxMap,
     speakers: [{ id: 'A', design }] };
+  if (native) settings.fxMap = { ...settings.fxMap, keyword: draft.fx };
   const lines = [{ id: 'test', src: [start, end], text: draft.separate ? draft.subtitle : draft.text,
-    fx: draft.fx, fxText: draft.separate ? draft.text : '', fxPos: draft.position, screen: draft.screen, speaker: 'A' }];
+    fx: native ? 'keyword' : draft.fx, fxText: draft.separate ? draft.text : '', fxPos: draft.position, screen: draft.screen, speaker: 'A' }];
   const items = buildItems(lines, [{ start: 0, end: total, out: 0 }], settings)
     .filter(item => draft.fx || draft.separate || !item.style.startsWith('subtitle'));
   return { total, start, end, items,
-    subtitle: designToStyle(design, draft.aspect), style: settings.fxMap[draft.fx] || FX[draft.fx]?.style || 'subtitle' };
+    subtitle: designToStyle(design, draft.aspect), style: native ? draft.fx : settings.fxMap[draft.fx] || FX[draft.fx]?.style || 'subtitle' };
 }

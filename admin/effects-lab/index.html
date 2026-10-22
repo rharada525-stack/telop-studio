@@ -33,7 +33,7 @@
     <div class="transport">
       <div class="play-row"><button id="play" type="button">▶ 再生</button><button id="replay" type="button" class="ghost">↶ 最初から</button><button id="prev" type="button" class="ghost" aria-label="1コマ戻る">−1f</button><button id="next" type="button" class="ghost" aria-label="1コマ進む">＋1f</button><output id="clock">0.00s</output></div>
       <input id="seek" type="range" min="0" max="4.2" step="0.033333333333" value="0" aria-label="演出の再生位置">
-      <div class="play-row options"><label>速度<select id="speed"><option value="0.25">0.25倍</option><option value="0.5">0.5倍</option><option value="1" selected>1倍</option></select></label><label><input type="checkbox" id="loop" checked> ループ</label><label><input type="checkbox" id="sound" checked> 効果音</label><label><input type="checkbox" id="guides"> ガイド</label><button id="png" type="button" class="ghost">PNG保存</button></div>
+      <div class="play-row options"><label>速度<select id="speed"><option value="0.25">0.25倍</option><option value="0.5">0.5倍</option><option value="1" selected>1倍</option></select></label><label><input type="checkbox" id="loop" checked> ループ</label><label><input type="checkbox" id="sound" checked> 効果音</label><label><input type="checkbox" id="guides"> ガイド</label><button id="png" type="button" class="ghost" title="比較・共有用の静止画。Premiere用データは下の.prprojから保存します。">確認画像を保存</button></div>
     </div>
     <div class="background-controls"><label>背景<select id="background"><option value="scene">テスト背景</option><option value="dark">暗い背景</option><option value="light">明るい背景</option><option value="checker">市松</option></select></label><label class="file-button">画像・動画を使う<input id="media" type="file" accept="image/*,video/*" hidden></label><button id="clearMedia" class="ghost" type="button" hidden>素材を外す</button><label id="offsetLabel" hidden>動画の開始位置（秒）<input id="offset" type="number" min="0" step="0.1" value="0"></label><span id="mediaName"></span></div>
     <p id="status" role="status" aria-live="polite">準備中…</p>
@@ -62,6 +62,11 @@
     <div class="two"><button id="save" type="button">試作を保存</button><button id="export" type="button" class="ghost">JSONに保存</button></div>
     <button id="saveAs" type="button" class="ghost">別の試作として保存</button>
     <button id="new" type="button" class="ghost">新しい試作</button>
+    <hr>
+    <h2>Premiereの標準テキスト</h2>
+    <small id="nativeNote">検証用 .prproj</small>
+    <button id="nativeExport" type="button" class="ghost">この試作を.prprojに保存（検証用）</button>
+    <button id="nativeBatch" type="button" class="ghost">標準テキスト3案を.prprojに保存</button>
   </aside>
 </main>
 <script type="module" src="lab.js"></script>
