@@ -1,3 +1,5 @@
+import { attachFontPicker } from './font-picker.js?v=20261022-fonts2';
+import { localFonts } from './local-fonts.js';
 // 字幕（デフォルトテロップ）のデザイン設定。Premiere のエッセンシャルグラフィックスに近い項目を数値で決める。
 
 // 塗り（文字・境界線共通）: 単色、またはグラデーション（始まり→[中間]→終わり、角度 0°=上→下 / 90°=左→右）
@@ -172,16 +174,16 @@ export function buildDesignPanel(container, { getDesign, getAspect, onChange }) 
   const inputs = [];
   const fontList = document.createElement("datalist");
   fontList.id = "fontList";
-  const fillFonts = (local = []) => {
+  const fillFonts = (local = localFonts.families()) => {
     fontList.innerHTML = "";
-    for (const f of [...WEB_FONTS, ...local]) fontList.appendChild(Object.assign(document.createElement("option"), { value: f }));
+    for (const f of new Set([...WEB_FONTS, ...local])) fontList.appendChild(Object.assign(document.createElement("option"), { value: f }));
   };
   fillFonts();
   container.appendChild(fontList);
 
   // 1項目分の入力欄。obj() はその項目が入っているオブジェクト（境界線なら各境界線）を返す
   const field = (parent, label, rawPath, type, opt, obj = getDesign, after = () => {}) => {
-    const row = document.createElement("label");
+    const row = document.createElement(type === 'font' ? 'div' : 'label');
     row.className = `dz-row dz-${type}`;
     row.append(Object.assign(document.createElement("span"), { textContent: label }));
     let el;
@@ -195,6 +197,7 @@ export function buildDesignPanel(container, { getDesign, getAspect, onChange }) 
     } else if (type === "font") {
       el = Object.assign(document.createElement("input"), { type: "text", placeholder: "フォント名" });
       el.setAttribute("list", "fontList");
+      el.setAttribute('aria-label', 'フォント');
     } else {
       el = Object.assign(document.createElement("input"), { type: "number", min: opt.min, max: opt.max, step: 1 });
     }
@@ -279,19 +282,10 @@ export function buildDesignPanel(container, { getDesign, getAspect, onChange }) 
     sec.className = "dz-sec";
     sec.innerHTML = `<legend>${title}</legend>`;
     for (const [label, rawPath, type, opt] of fields) {
-      const { row } = field(sec, label, rawPath, type, opt);
+      const { row, el } = field(sec, label, rawPath, type, opt);
       if (type === "font") {
-        const btn = Object.assign(document.createElement("button"), { type: "button", className: "ghost small", textContent: "PCのフォント" });
-        btn.title = "このパソコンに入っているフォントを候補に追加します";
-        btn.onclick = async () => {
-          if (!("queryLocalFonts" in window)) { alert("このブラウザではPCのフォント一覧を取得できません。フォント名を直接入力してください。"); return; }
-          try {
-            const fonts = await window.queryLocalFonts();
-            fillFonts([...new Set(fonts.map((f) => f.family))].sort((a, b) => a.localeCompare(b, "ja")));
-            btn.textContent = "追加しました";
-          } catch { alert("フォントの読み取りが許可されませんでした。フォント名を直接入力しても使えます。"); }
-        };
-        row.append(btn);
+        inputs.push(attachFontPicker(row, { input: el, getWeight: () => getDesign().weight, onRead: fillFonts,
+          onSelect: family => { getDesign().family = family; onChange(getDesign()); } }));
       }
     }
     container.appendChild(sec);

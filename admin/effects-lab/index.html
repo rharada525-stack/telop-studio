@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=M+PLUS+Rounded+1c:wght@800&family=Shippori+Mincho+B1:wght@800&family=Yusei+Magic&family=Yuji+Boku&display=swap" rel="stylesheet">
 <link href="lab.css" rel="stylesheet">
+<link href="../../telop-studio/css/font-picker.css?v=20261022-fonts1" rel="stylesheet">
 </head>
 <body>
 <header><div><strong>テロップスタジオ <span>演出ラボ</span></strong><small>LOCAL / ADMIN</small></div><p>試作はこのページだけ。本体への反映は別途行います。</p></header>
@@ -65,10 +66,11 @@
     <hr>
     <h2>Premiere用XML（読み込みテスト）</h2>
     <small id="nativeNote">文字と表示時間のみ。フチ・傾き・動きは含みません。現行Premiereでの文字編集は未確認です。</small>
+    <div id="xmlFontPicker"><label>XMLに使うフォント<input id="xmlFont" type="text" value="Yu Gothic" maxlength="200"></label></div>
     <button id="nativeExport" type="button" class="ghost">この文字をXMLに保存（検証用）</button>
     <button id="nativeBatch" type="button" class="ghost">文字3個のXMLを保存（検証用）</button>
   </aside>
 </main>
-<script type="module" src="lab.js"></script>
+<script type="module" src="lab.js?v=20261022-fonts2"></script>
 </body>
 </html>

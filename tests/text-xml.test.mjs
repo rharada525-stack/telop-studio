@@ -47,6 +47,13 @@ test('空文字・逆転する時間・重なり・不正な解像度を黙っ�
   assert.throws(() => buildTextXml({ items: [valid, valid] }));
 });
 
+test('フォントの固定指定をやめ、PCフォントの実名と特殊文字をXMLへ渡せる', () => {
+  const options = { items: [{ text: '確認', t: .5, d: 3 }] };
+  assert.match(buildTextXml(options), /<parameterid>fontname<\/parameterid><name>Font<\/name><value>Yu Gothic<\/value>/);
+  assert.match(buildTextXml({ ...options, fontName: 'PCFont-Bold & <test>' }), /<value>PCFont-Bold &amp; &lt;test&gt;<\/value>/);
+  assert.throws(() => buildTextXml({ ...options, fontName: '' }));
+});
+
 test('壊れたprprojの出力をUIから撤去し、XMLの検証範囲を表示する', async () => {
   const html = await readFile(new URL('../admin/effects-lab/index.html', import.meta.url), 'utf8');
   const js = await readFile(new URL('../admin/effects-lab/lab.js', import.meta.url), 'utf8');

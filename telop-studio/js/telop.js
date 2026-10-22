@@ -1,3 +1,4 @@
+import { localFonts } from './local-fonts.js';
 // テロップ描画エンジン（Python 版 short-template/engine/telop.py のブラウザ移植）
 // 多重フチ・グラデ塗り・影/グロー・座布団・ワイプ・ブロック/1文字アニメ
 
@@ -8,7 +9,7 @@ const WEBFONTS = {
 };
 // st.family（フォント名を直接指定。PCに入っているフォントも可）があればそれを優先する
 const fontCss = (st, size) => {
-  if (st.family) return `${st.weight ?? 900} ${size}px "${st.family}", "Noto Sans JP", sans-serif`;
+  if (st.family) return `${st.weight ?? 900} ${size}px ${JSON.stringify(localFonts.cssFamily(st.family))}, "Noto Sans JP", sans-serif`;
   const f = WEBFONTS[st.font] || { family: "Noto Sans JP", weight: 900 };
   return `${f.weight} ${size}px "${f.family}"`;
 };
@@ -596,6 +597,7 @@ export async function makeItem(it, styles, W, H, fps) {
   if (st.effect === "flash") return new Flash(st, W, H);
   const fonts = st.group ? [styles[st.label_style], styles[st.body_style]] : [st];
   const chars = (it.label || "") + it.text;
+  await Promise.all(fonts.map(f => localFonts.load(f.family, f.weight ?? 900)));
   await ensureFonts(fonts.map((f) => fontCss(f, 100)), chars);
   const pos = [...(it.pos || st.pos || [W / 2, H / 2])];
   // _W は「画面幅いっぱいの帯」を作るときに使う

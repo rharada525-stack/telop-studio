@@ -1,5 +1,5 @@
 // 1フレーム = 動画（出力の形に合わせる）+ テロップ を描く
-import { makeItem } from "./telop.js";
+import { makeItem } from "./telop.js?v=20261022-fonts1";
 
 export const FPS = 30;
 export const FORMATS = {

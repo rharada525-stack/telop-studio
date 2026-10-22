@@ -1,0 +1,5 @@
+.pc-font-picker { flex-basis:100%; width:100%; display:grid; gap:8px; margin-top:2px; }
+.pc-font-picker[hidden] { display:none; }
+.pc-font-picker input[type=search], .pc-font-picker select { width:100%; min-width:0; min-height:36px; padding:6px 8px; }
+.pc-font-picker input[type=search] { background:var(--field); color:var(--text); border:1px solid var(--line); border-radius:8px; }
+.pc-font-picker small { display:block; font-size:11px; line-height:1.6; overflow-wrap:anywhere; }

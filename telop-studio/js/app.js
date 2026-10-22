@@ -1,5 +1,5 @@
-import { resolveStyles } from "./telop.js";
-import { Renderer } from "./render.js";
+import { resolveStyles } from "./telop.js?v=20261022-fonts1";
+import { Renderer } from "./render.js?v=20261022-fonts1";
 import {
   decodeAudio, toMono16k, loudness, detectSpeech, buildLines, buildSegments, buildItems,
   CUT_PRESETS, normalizeWords, alignWordTimes, buildLinesFromWords, retakeHints, timedLines,
@@ -7,7 +7,7 @@ import {
 } from "./timeline.js?v=20261022-cuts2";
 import { mixAudio, exportMp4 } from "./export.js";
 import { openMedia, decodeAudioTrack } from "./decode.js";
-import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js";
+import { DEFAULT_DESIGN, normalizeDesign, designToStyle, buildDesignPanel } from "./design.js?v=20261022-fonts2";
 import { autoEdit, describe } from "./autoedit.js";
 import { buildPremierePackage } from "./premiere.js?v=20261022-cuts2";
 import { DESIGN_SETS, setDesign as designOfSet } from "./sets.js?v=20261022-copy1";
