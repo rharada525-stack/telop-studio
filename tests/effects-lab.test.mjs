@@ -45,8 +45,8 @@ test('ラボはPagesの公開対象の外にあり、本体画面には入口が
 });
 
 
-test('11の動きと20のデザインを独立して組み合わせても横長の下配置を維持する', () => {
-  assert.equal(Object.keys(XML_PRESETS).length, 11); assert.equal(Object.keys(DESIGN_VARIANTS).length, 20);
+test('15の動きと22のデザインを独立して組み合わせても横長の下配置を維持する', () => {
+  assert.equal(Object.keys(XML_PRESETS).length, 15); assert.equal(Object.keys(DESIGN_VARIANTS).length, 22);
   const motions = new Set();
   for (const [fx, preset] of Object.entries(XML_PRESETS)) for (const design of Object.keys(DESIGN_VARIANTS)) {
     const draft = { ...newDraft(), fx, text: preset.sample, design };
@@ -220,6 +220,8 @@ test('豪華演出の初回だけ推奨デザインを適用し、ユーザー�
     ['xml_sparkle_sweep', 'sweep', 'luxury_gold'],
     ['xml_sparkle_burst', 'burst', 'luxury_platinum'],
     ['xml_sparkle_cascade', 'cascade', 'luxury_rose'],
+    ['xml_sparkle_celebration', 'celebration', 'luxury_champagne'],
+    ['xml_sparkle_twinkle', 'twinkle', 'luxury_crystal'],
   ]) {
     const original = { ...newDraft(), fx, text: '自分の文章で輝かせたい', duration: 4.5, position: 'auto' };
     const before = JSON.stringify(original), first = applyMotionDesign(original);
@@ -277,6 +279,101 @@ test('推奨デザインの初回履歴と豪華演出は保存復元でき、�
   for (const recommendedMotions of ['xml_sparkle_sweep', ['xml_pop'], ['unknown'], ['xml_sparkle_sweep', 'xml_sparkle_sweep']]) {
     assert.throws(() => validateDraft({ ...newDraft(), recommendedMotions }, names));
   }
-  for (const sparkle of ['none', 'sweep', 'burst', 'cascade']) assert.equal(validateStyle({ sparkle }, names).sparkle, sparkle);
+  for (const sparkle of ['none', 'sweep', 'burst', 'cascade', 'celebration', 'twinkle']) assert.equal(validateStyle({ sparkle }, names).sparkle, sparkle);
   for (const sparkle of ['unknown', true, 1]) assert.throws(() => validateStyle({ sparkle }, names));
+});
+
+
+test('シャンパンとクリスタルは編集可能XMLの制約内で書体とフチ構成を分ける', () => {
+  const ids = ['luxury_champagne', 'luxury_crystal'];
+  const nativePaint = paint => {
+    if (typeof paint === 'string') { assert.match(paint, /^#[0-9a-f]{6}$/i); return; }
+    assert.equal(paint.angle, 0); assert.ok(paint.stops.length >= 2 && paint.stops.length <= 8);
+    paint.stops.forEach(stop => assert.match(stop, /^#[0-9a-f]{6}$/i));
+  };
+  for (const id of ids) {
+    const variant = DESIGN_VARIANTS[id]; assert.equal(variant.category, 'luxury');
+    for (const aspect of ['portrait', 'landscape']) {
+      const draft = selectDesign({ ...newDraft(), fx: 'xml_sparkle_twinkle', aspect }, id);
+      const style = designStyle(draft);
+      nativePaint(style.fill);
+      assert.ok(style.strokes.length >= 1 && style.strokes.length <= 4);
+      let previous = 0;
+      for (const stroke of style.strokes) {
+        assert.ok(stroke.w > previous && stroke.w <= 80); previous = stroke.w; nativePaint(stroke.color);
+      }
+      assert.ok(!style.plate && !style.group && !style.vertical && !style.char && !style.shadows.length);
+      assert.equal(style.rotate || 0, 0); assert.equal(style.sparkle, 'twinkle');
+      assert.equal(fontForStyle(draft, style).postscriptName, FONT_CHOICES[variant.fontChoice].postscriptName);
+      if (aspect === 'landscape') {
+        assert.ok(style.size >= 132 && style.size <= 150);
+        assert.deepEqual(sceneFor(draft).items[0].pos, [960, 900]);
+      }
+    }
+  }
+  const [champagne, crystal] = ids.map(id => DESIGN_VARIANTS[id]);
+  assert.notEqual(champagne.fontChoice, crystal.fontChoice);
+  assert.notDeepEqual(champagne.style.strokes.map(stroke => stroke.w), crystal.style.strokes.map(stroke => stroke.w));
+});
+
+test('追加した派手な輝きでも試作の手調整と標準指定を保存し、色を替えても輝きは変えない', () => {
+  for (const fx of ['xml_sparkle_celebration', 'xml_sparkle_twinkle']) {
+    const original = applyMotionDesign({ ...newDraft(), fx, text: '自分の編集した文章', duration: 2.7, position: 'tr' });
+    const edited = selectFont(selectDesign(original, 'ruby'), FONT_CHOICES.yu_bold);
+    edited.overrides.landscape[fx] = { size: 129, max_width: 1460, in: 'fade_up', out_d: .45 };
+    const restored = validateDraft(JSON.parse(JSON.stringify(edited)), names);
+    assert.deepEqual(restored, edited);
+    const repeated = applyMotionDesign(restored);
+    assert.equal(repeated.design, 'ruby'); assert.equal(repeated.font.postscriptName, 'YuGothic-Bold');
+    assert.equal(repeated.text, '自分の編集した文章'); assert.equal(repeated.duration, 2.7); assert.equal(repeated.position, 'tr');
+    assert.equal(designStyle(repeated).size, 129); assert.equal(designStyle(repeated).in, 'fade_up');
+    assert.equal(designStyle(repeated).sparkle, XML_PRESETS[fx].style.sparkle);
+    const defaults = validateDefaults(JSON.parse(JSON.stringify({ kind: 'effects-lab-design-defaults', version: 1,
+      defaults: { [fx]: captureDesignDefault(restored) } })), names);
+    const selectedAgain = applyMotionDesign({ ...newDraft(), fx }, defaults);
+    assert.equal(selectedAgain.design, 'ruby'); assert.equal(selectedAgain.font.postscriptName, 'YuGothic-Bold');
+    assert.equal(designStyle(selectedAgain).size, 129); assert.equal(designStyle(selectedAgain).in, XML_PRESETS[fx].style.in);
+    assert.equal(designStyle(selectedAgain).sparkle, XML_PRESETS[fx].style.sparkle);
+    const recolored = selectDesign(selectedAgain, 'luxury_crystal');
+    assert.equal(designStyle(recolored).sparkle, XML_PRESETS[fx].style.sparkle);
+    assert.equal(designStyle(recolored).size, 138);
+  }
+});
+
+test('文字表面の光は推奨デザインと下配置で始まり、色替え・書体変更・保存復元でも動きを保持する', () => {
+  for (const [fx, kind, design, sparkle] of [['xml_surface_sweep', 'sweep', 'luxury_gold', undefined], ['xml_surface_double', 'double', 'luxury_champagne', 'twinkle']]) {
+    const original = applyMotionDesign({ ...newDraft(), fx, text: '自分の文章', duration: 2.7 });
+    assert.equal(original.design, design);
+    const st = designStyle(original);
+    assert.equal(st.surfaceLight, kind); assert.equal(st.sparkle, sparkle); assert.equal(st.rotate || 0, 0);
+    assert.deepEqual(sceneFor(original).items[0].pos, [960, 900]);
+    const recolored = selectFont(selectDesign(original, 'ruby'), FONT_CHOICES.yu_bold);
+    const restored = validateDraft(JSON.parse(JSON.stringify(recolored)), names);
+    assert.deepEqual(restored, recolored);
+    assert.equal(designStyle(restored).surfaceLight, kind); assert.equal(designStyle(restored).sparkle, sparkle);
+    assert.equal(restored.text, '自分の文章'); assert.equal(restored.duration, 2.7);
+    assert.equal(fontForStyle(restored, designStyle(restored)).postscriptName, 'YuGothic-Bold');
+    assert.equal(applyMotionDesign(restored).design, 'ruby', '初回の推奨へ戻さない');
+    const defaults = { [fx]: captureDesignDefault(recolored) };
+    const fromDefault = applyMotionDesign({ ...newDraft(), fx }, defaults);
+    assert.equal(fromDefault.design, 'ruby'); assert.equal(designStyle(fromDefault).surfaceLight, kind);
+    assert.equal(fromDefault.font.postscriptName, 'YuGothic-Bold');
+  }
+});
+
+test('表面光とキラキラを個別に解除でき、標準デザインには表面光の動きを保存しない', () => {
+  const draft = applyMotionDesign({ ...newDraft(), fx: 'xml_surface_double' });
+  for (const aspect of ['portrait', 'landscape']) draft.overrides[aspect][draft.fx] = { surfaceLight: 'none', sparkle: 'none', size: 123 };
+  const recolored = selectDesign(draft, 'ice');
+  assert.equal(designStyle(recolored).surfaceLight, 'none'); assert.equal(designStyle(recolored).sparkle, 'none');
+  assert.deepEqual(validateDraft(JSON.parse(JSON.stringify(recolored)), names), recolored);
+  const preferred = captureDesignDefault(recolored);
+  for (const aspect of ['portrait', 'landscape']) assert.equal(Object.hasOwn(preferred.overrides[aspect], 'surfaceLight'), false);
+  const fresh = applyMotionDesign({ ...newDraft(), fx: 'xml_surface_double' }, { xml_surface_double: preferred });
+  assert.equal(designStyle(fresh).surfaceLight, 'double'); assert.equal(designStyle(fresh).sparkle, 'twinkle');
+  assert.ok(Object.values(DESIGN_VARIANTS).every(variant => !Object.hasOwn(variant.style, 'surfaceLight')));
+  assert.throws(() => validateDefaults({ kind: 'effects-lab-design-defaults', version: 1,
+    defaults: { xml_surface_double: { ...preferred, overrides: { landscape: { surfaceLight: 'sweep' } } } } }, names));
+  for (const surfaceLight of ['none', 'sweep', 'double']) assert.equal(validateStyle({ surfaceLight }, names).surfaceLight, surfaceLight);
+  for (const surfaceLight of ['unknown', '', true, false, 0, {}, ['sweep']]) assert.throws(() => validateStyle({ surfaceLight }, names));
 });

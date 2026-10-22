@@ -13,3 +13,6 @@ desktop.ini
 
 # 動作確認で作る一時素材
 test-footage/_tmp/
+
+# Premiereでラボの見本を開いた際の自動保存
+admin/effects-lab/samples/Adobe Premiere Pro Auto-Save/

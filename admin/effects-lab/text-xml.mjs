@@ -3,7 +3,8 @@
 // https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Applications/Applications.html
 import { blockState } from '../../telop-studio/js/block-motion.js';
 import { makeTextData, base64, isSupportedPaint } from './source-text.mjs?v=20261023-rich1';
-import { getSparkleClips, isSparkleType } from './sparkles.mjs?v=20261023-sparkle1';
+import { getSparkleClips, isSparkleType } from './sparkles.mjs?v=20261023-sparkle2';
+import { getSurfaceLightSamples, buildSurfaceLightClip, isSurfaceLightType } from './surface-light.mjs?v=20261023-surface1';
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[ch]));
 const rate = '<rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>';
 const parameter = (id, name, value) => `<parameter><parameterid>${id}</parameterid><name>${name}</name><value>${value}</value></parameter>`;
@@ -13,6 +14,7 @@ const enters = new Set(['none', 'slam', 'pop', 'drop', 'elastic', 'slide_left', 
 const exits = new Set(['none', 'fade', 'zoom_out', 'pop_out', 'shrink', 'slide_out_left', 'slide_out_right']);
 const idles = new Set(['none', 'pulse', 'float', 'tremble', 'wobble']);
 const hasSparkle = style => style?.sparkle != null && style.sparkle !== '' && style.sparkle !== 'none';
+const hasSurfaceLight = style => style?.surfaceLight != null && style.surfaceLight !== '' && style.surfaceLight !== 'none';
 
 export function xmlStyleWarnings(st, text = '') {
   if (!st) return ['演出を選んでください'];
@@ -26,6 +28,7 @@ export function xmlStyleWarnings(st, text = '') {
   if (!enters.has(st.in || 'none') || !exits.has(st.out || 'fade') || !idles.has(st.idle || 'none')) reasons.push('ワイプ・変形などの動き');
   if (st.tracking) reasons.push('字間の指定');
   if (hasSparkle(st) && !isSparkleType(st.sparkle)) reasons.push('未対応のキラキラ');
+  if (hasSurfaceLight(st) && !isSurfaceLightType(st.surfaceLight)) reasons.push('未対応の文字表面の光');
   if (/[{}\[\]]/.test(text) && (st.accent || st.accent2 || st.accent_scale && st.accent_scale !== 1)) reasons.push('一部だけの強調');
   if (/[\r\n]/.test(text)) reasons.push('複数行の行間');
   return reasons;
@@ -105,11 +108,22 @@ export function buildTextXml({ name = '演出ラボ_文字の読み込みテス�
           style.out_d != null && (!Number.isFinite(style.out_d) || style.out_d < 0 || style.out_d > 3) ||
           style.pos != null && (!Array.isArray(style.pos) || style.pos.length !== 2 || !style.pos.every(n => Number.isFinite(n) && Math.abs(n) <= 10000))) throw new Error('文字サイズ・位置・傾き・退場時間が不正です。');
       if (hasSparkle(style) && (!item.bounds || !['width', 'height'].every(key => Number.isFinite(item.bounds[key]) && item.bounds[key] > 0 && item.bounds[key] <= 8192))) throw new Error('キラキラには本文の実際の幅と高さが必要です。');
+      if (hasSurfaceLight(style) && (!item.bounds || !['width', 'height'].every(key => Number.isFinite(item.bounds[key]) && item.bounds[key] > 0 && item.bounds[key] <= 8192))) throw new Error('文字表面の光には本文の実際の幅と高さが必要です。');
     }
     return { text, start, end, index, style, bounds: item.bounds, fontName: checkFont(item.fontName ?? fontName) };
   }).sort((a, b) => a.start - b.start);
   if (clips.some((clip, i) => i && clip.start < clips[i - 1].end)) throw new Error('文字の表示時間を重ねないでください。');
-  const generators = clips.map(({ text, start, end, index, style, fontName }) => {
+  const generators = clips.map(({ text, start, end, index, style, fontName, bounds }) => {
+    if (hasSurfaceLight(style)) {
+      // 本文を1個だけ共有し、光沢合成後の外側ネストへ登場・退場を1回適用する。
+      const frames = end - start;
+      const stillStyle = { ...style, in: 'none', out: 'none', out_d: 0, idle: 'none', rotate: 0,
+        sparkle: 'none', surfaceLight: 'none', pos: [W / 2, H / 2] };
+      const sourceClip = graphicClip({ text, start: 0, end: frames, style: stillStyle, id: `surface-body-${index + 1}` }, W, H, fontName);
+      const light = getSurfaceLightSamples({ style, bounds, t: start / 30, d: frames / 30, W, H });
+      return buildSurfaceLightClip({ id: index + 1, text, sourceClip, start, end, W, H, light,
+        motionFilters: motionFilters(style, frames, W, H) });
+    }
     if (style && (typeof style.fill !== 'string' || style.strokes?.some(s => s.w > 0))) return graphicClip({ text, start, end, index, style }, W, H, fontName);
     const rgb = style ? style.fill.slice(1).match(/../g).map(n => parseInt(n, 16)) : [255, 255, 255];
     // PremiereのFCP Text変換は480行基準。既存の読み込み用XMLはそのまま保持。

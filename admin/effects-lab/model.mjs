@@ -2,7 +2,7 @@
 import { FX, buildItems } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS, setDesign } from '../../telop-studio/js/sets.js';
 import { designToStyle } from '../../telop-studio/js/design.js';
-import { NATIVE_PRESETS, DESIGN_VARIANTS, DEFAULT_FONT, FONT_CHOICES, nativeStyles, variantStyle } from './native-presets.mjs?v=20261023-sparkle1';
+import { NATIVE_PRESETS, DESIGN_VARIANTS, DEFAULT_FONT, FONT_CHOICES, nativeStyles, variantStyle } from './native-presets.mjs?v=20261023-surface1';
 export const EFFECTS = { ...Object.fromEntries(Object.entries(NATIVE_PRESETS).map(([id, preset]) => [id, { name: preset.name, style: id }])), ...FX };
 
 export const STORAGE_KEY = 'telop-studio:effects-lab:v1';
@@ -72,7 +72,8 @@ export function validateStyle(st, names) {
   for (const key of ['max_width', 'max_height']) if (st[key] != null && (!Number.isFinite(st[key]) || st[key] < 1 || st[key] > 2400)) throw new Error(`${key}は1〜2400で指定してください。`);
   if (st.group && (!names.includes(st.label_style) || !names.includes(st.body_style))) throw new Error('見出し・本文のスタイルが見つかりません。');
   if (st.pos && (!Array.isArray(st.pos) || st.pos.length !== 2 || !st.pos.every(Number.isFinite))) throw new Error('posは[X, Y]で指定してください。');
-  if (st.sparkle != null && !['none', 'sweep', 'burst', 'cascade'].includes(st.sparkle)) throw new Error('輝きはnone / sweep / burst / cascadeから選んでください。');
+  if (st.sparkle != null && !['none', 'sweep', 'burst', 'cascade', 'celebration', 'twinkle'].includes(st.sparkle)) throw new Error('輝きはnone / sweep / burst / cascade / celebration / twinkleから選んでください。');
+  if (st.surfaceLight != null && !['none', 'sweep', 'double'].includes(st.surfaceLight)) throw new Error('文字表面の光はnone / sweep / doubleから選んでください。');
   if (st.char && !['pop', 'type', 'drop'].includes(st.char)) throw new Error('1文字の動きはpop / type / dropから選んでください。');
   return st;
 }

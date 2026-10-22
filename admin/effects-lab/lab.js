@@ -1,13 +1,14 @@
 import { Renderer, FPS } from '../../telop-studio/js/render.js?v=20261022-effects2';
-import { resolveStyles, makeItem } from '../../telop-studio/js/telop.js?v=20261022-effects2';
+import { resolveStyles, makeItem, blockState } from '../../telop-studio/js/telop.js?v=20261022-effects2';
 import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
-import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, applyMotionDesign, validateDefaults, fontForStyle } from './model.mjs?v=20261023-sparkle1';
-import { XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-sparkle1';
-import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-sparkle1';
+import { EFFECTS as FX, STORAGE_KEY, DEFAULTS_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor, designStyle, selectDesign, selectFont, captureDesignDefault, applyDesignDefault, applyMotionDesign, validateDefaults, fontForStyle } from './model.mjs?v=20261023-surface1';
+import { XML_PRESETS, DESIGN_VARIANTS, DESIGN_CATEGORIES, FONT_CHOICES, DEFAULT_FONT, nativeStyles } from './native-presets.mjs?v=20261023-surface1';
+import { buildTextXml, xmlStyleWarnings } from './text-xml.mjs?v=20261023-surface1';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
-import { getSparkleClips, sampleSparkleAt } from './sparkles.mjs?v=20261023-sparkle1';
+import { getSparkleClips, sampleSparkleAt } from './sparkles.mjs?v=20261023-sparkle2';
+import { getSurfaceLightSamples, sampleSurfaceLightAt } from './surface-light.mjs?v=20261023-surface1';
 
 const $ = id => document.getElementById(id);
 const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
@@ -22,7 +23,7 @@ let exporting = false;
 const dirtyFields = new Set();
 let styleDirty = false, defaults = {}, cardGeneration = 0, cardsKey = "";
 let designCategory = '', lastDesign = '';
-const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d', sparkle: 'sparkle' };
+const styleFields = { fill: 'fill', size: 'size', rotate: 'rotate', enter: 'in', exit: 'out', character: 'char', stagger: 'stagger', idle: 'idle', outDuration: 'out_d', sparkle: 'sparkle', surfaceLight: 'surfaceLight' };
 const audioBuffers = new Map();
 const contexts = { original: $('original').getContext('2d'), preview: $('preview').getContext('2d') };
 const controlIds = ['aspect', 'set', 'text', 'subtitle', 'separate', 'duration', 'position', 'screen', 'name'];
@@ -141,6 +142,7 @@ async function prepare(next) {
     }
     const items = setup.items.filter(item => item.style === '__screen' || renderer.styles[item.style]?.effect || item.text?.trim());
     await renderer.setItems(items);
+    addSurfaceLightPreview(renderer);
     await addSparklePreview(renderer);
     // JSONの描画エラーは採用前に検出し、最後に描けたプレビューを保持する。
     const probe = document.createElement('canvas'); probe.width = renderer.W; probe.height = renderer.H;
@@ -157,6 +159,44 @@ function measuredText(renderer, item) {
   return { text: item.text, t: item.t, d: item.d,
     bounds: { width: item.obj.width() + outline * 2, height: item.obj.height() + outline * 2 },
     style: { ...renderer.styles[item.style], size: item.obj.block.size, pos: [item.obj.center(), item.obj.centerY()] } };
+}
+
+// XMLと同じ順序で、文字画像へ光の帯をScreen合成してから本文の動き・透明度を1回掛ける。
+// 背景は合成対象にせず、本文の同じ字面だけを明るくする。
+function addSurfaceLightPreview(renderer) {
+  for (const item of renderer.items) {
+    const object = item.obj;
+    if (!object?.block) continue;
+    const style = renderer.styles[item.style];
+    if (!style.surfaceLight || style.surfaceLight === 'none') continue;
+    const effect = getSurfaceLightSamples({ ...measuredText(renderer, item), W: renderer.W, H: renderer.H });
+    if (!effect) continue;
+    const baseImage = object.block.compose(0), combined = document.createElement('canvas');
+    combined.width = baseImage.width; combined.height = baseImage.height;
+    const paint = combined.getContext('2d'), drawOriginal = object.draw.bind(object);
+    object.draw = (ctx, localTime, duration) => {
+      const band = sampleSurfaceLightAt(effect, item.t + localTime);
+      if (!band || band.opacity <= 0) { drawOriginal(ctx, localTime, duration); return; }
+      const image = object.block.compose(localTime), state = blockState(object.st, localTime, duration);
+      if (state.op <= .001 || state.wipe <= .001 || state.wipeFrom >= .999) return;
+      paint.clearRect(0, 0, combined.width, combined.height);
+      paint.drawImage(image, 0, 0);
+      paint.save();
+      paint.beginPath(); paint.rect(band.left + combined.width / 2, 0, band.right - band.left, combined.height); paint.clip();
+      paint.globalCompositeOperation = 'screen'; paint.globalAlpha = band.opacity;
+      paint.drawImage(image, 0, 0); paint.restore();
+      ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, state.op));
+      ctx.translate(object.center() + state.dx, object.centerY() + state.dy);
+      ctx.rotate((state.rot + (object.st.rotate || 0)) * Math.PI / 180);
+      ctx.scale(state.s * (state.sx ?? 1), state.s * (state.sy ?? 1));
+      if ((state.wipe ?? 1) < 1 || (state.wipeFrom ?? 0) > 0) {
+        const from = state.wipeFrom || 0;
+        ctx.beginPath(); ctx.rect(-combined.width / 2 + combined.width * from, -combined.height / 2,
+          combined.width * Math.min(state.wipe ?? 1, 1 - from), combined.height); ctx.clip();
+      }
+      ctx.drawImage(combined, -combined.width / 2, -combined.height / 2); ctx.restore();
+    };
+  }
 }
 
 // 時刻から毎回同じ星を描く。再生・逆方向シーク・XMLで粒子の位置と明るさを共有。
@@ -210,11 +250,12 @@ async function setDraft(next, resetTime = false) {
 function syncStyle() {
   styleDirty = false; dirtyFields.clear();
   const st = prototype.styles[part];
-  const values = { fill: /^#[\da-f]{6}$/i.test(st.fill) ? st.fill : '#ffffff', size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18, sparkle: st.sparkle || 'none' };
+  const values = { fill: /^#[\da-f]{6}$/i.test(st.fill) ? st.fill : '#ffffff', size: st.size || 66, rotate: st.rotate || 0, enter: st.in || 'none', exit: st.out || 'fade', character: st.char || '', stagger: st.stagger ?? 0.03, idle: st.idle || 'none', outDuration: st.out_d ?? 0.18, sparkle: st.sparkle || 'none', surfaceLight: st.surfaceLight || 'none' };
   for (const [id, value] of Object.entries(values)) $(id).value = value;
   for (const id of ['size', 'rotate', 'enter', 'character', 'stagger', 'idle']) $(id).disabled = !!st.group;
   $('fill').disabled = !!st.group || !/^#[\da-f]{6}$/i.test(st.fill);
   $('sparkle').disabled = !XML_PRESETS[draft.fx] || !!st.group;
+  $('surfaceLight').disabled = !XML_PRESETS[draft.fx] || !!st.group;
   const child = part !== scene.style && prototype.styles[scene.style].group;
   for (const id of ['exit', 'outDuration']) { $(id).disabled = !!child; $(id).title = child ? '退場は「全体（見出し＋本文）」で調整します' : ''; }
   $('json').value = JSON.stringify(st, null, 2);
@@ -226,7 +267,8 @@ function updateXmlControls() {
   if (!fontForStyle(draft, prototype.styles[scene.style])) warnings.push('書体を選び直してください');
   $('nativeExport').disabled = exporting || !draft.fx || !draft.text.trim() || !!warnings.length;
   const hasSparkle = prototype.styles[scene.style].sparkle && prototype.styles[scene.style].sparkle !== 'none';
-  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の演出から選べます。` : hasSparkle ? '本文とキラキラを別トラックの編集可能な文字として保存します。' : '文字・グラデーション・フチ・動きをXMLに保存できます。';
+  const hasSurfaceLight = prototype.styles[scene.style].surfaceLight && prototype.styles[scene.style].surfaceLight !== 'none';
+  $('xmlSupport').textContent = warnings.length ? `この試作はXML未対応: ${warnings.join('・')}。［XML］の演出から選べます。` : hasSurfaceLight ? '「本文を編集」シーケンスで文字を変更できます。' : hasSparkle ? '本文とキラキラを別トラックの編集可能な文字として保存します。' : '文字・グラデーション・フチ・動きをXMLに保存できます。';
 }
 
 function bind() {

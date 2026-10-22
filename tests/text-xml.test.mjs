@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
 import { buildTextXml, plainText, xmlStyleWarnings, motionSamples } from '../admin/effects-lab/text-xml.mjs';
 import { NATIVE_PRESETS, XML_PRESETS, DESIGN_VARIANTS, FONT_CHOICES, nativeStyles } from '../admin/effects-lab/native-presets.mjs';
 import { EFFECTS, sceneFor, newDraft, SAMPLES, designStyle, selectDesign, fontForStyle } from '../admin/effects-lab/model.mjs';
@@ -57,18 +58,67 @@ test('ファミリー名を渡さず、書体のPostScript名を渡し、太字�
   for (const fontName of ['', 'Yu Gothic', 'Noto Sans JP', ' 游ゴシック ', 'YuGothic<Bold>', 'x'.repeat(64)]) assert.throws(() => buildTextXml({ ...options, fontName }));
 });
 
-test('壊れたprprojの出力をUIから撤去し、XMLの検証範囲を表示する', async () => {
+test('prprojをブラウザで生成せず、実機保存サンプルへのダウンロードだけを許可する', async () => {
   const html = await readFile(new URL('../admin/effects-lab/index.html', import.meta.url), 'utf8');
   const js = await readFile(new URL('../admin/effects-lab/lab.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(html + js, /\.prproj|native-seed|native-project|compressProject/);
+  assert.doesNotMatch(js, /\.prproj|native-seed|native-project|compressProject/);
+  assert.doesNotMatch(html, /native-seed|compressProject/);
+  const links = [...html.matchAll(/<a\b[^>]*href="([^"]+\.prproj)"[^>]*>/g)];
+  assert.deepEqual(links.map(match => match[1]), ['./samples/premiere-native-light.prproj']);
+  assert.match(links[0][0], /\bdownload(?:\s|=|>)/);
+  assert.doesNotMatch(html.replace(links[0][0], ''), /\.prproj/);
   assert.match(html, /Premiereで文字編集・フォント・多重フチを確認済み/);
   assert.match(html, /通常字幕・背景・画面効果・効果音は含みません/);
+});
+
+test('実機保存サンプルは2つの本文と標準トランジションを保持し、外部映像を要求しない', async () => {
+  const file = await readFile(new URL('../admin/effects-lab/samples/premiere-native-light.prproj', import.meta.url));
+  assert.deepEqual([...file.subarray(0, 2)], [0x1f, 0x8b]);
+  const project = gunzipSync(file).toString('utf8');
+  assert.match(project, /<PremiereData Version="3">/);
+  assert.match(project, /<\/PremiereData>\s*$/);
+  assert.equal((project.match(/<Sequence\b[^>]*\bObjectUID=/g) || []).length, 1);
+  const blocks = tag => [...project.matchAll(new RegExp(`<${tag}\\b[^>]*\\bObject(?:ID|UID)="[^"]+"[^>]*>[\\s\\S]*?<\\/${tag}>`, 'g'))].map(match => match[0]);
+  const clips = blocks('VideoClipTrackItem'), transitions = blocks('VideoTransitionTrackItem');
+  assert.equal(clips.length, 2); assert.equal(transitions.length, 2);
+  assert.deepEqual(transitions.map(value => value.match(/<MatchName>([^<]+)<\/MatchName>/)?.[1]),
+    ['AE.AE_Impact_Copy_Machine', 'AE.AE_Impact_Light_Sweep']);
+  const transitionIds = transitions.map(value => value.match(/\bObjectID="([^"]+)"/)?.[1]);
+  clips.forEach((clip, i) => assert.match(clip, new RegExp(`<HeadTransition ObjectRef="${transitionIds[i]}"`)));
+  transitions.forEach(value => {
+    assert.match(value, /<HasOutgoingClip>false<\/HasOutgoingClip>/);
+    assert.match(value, /<HasIncomingClip>true<\/HasIncomingClip>/);
+    const reference = value.match(/<VideoFilterComponent ObjectRef="([^"]+)"/)?.[1];
+    assert.ok(reference && blocks('VideoFilterComponent').some(component => component.includes(`ObjectID="${reference}"`)));
+  });
+  const sources = blocks('ArbVideoComponentParam').filter(value => /<ParameterID>1<\/ParameterID>/.test(value));
+  assert.equal(sources.length, 2);
+  const text = sources.map(value => {
+    const encoded = value.match(/<StartKeyframeValue\b[^>]*>([\s\S]*?)<\/StartKeyframeValue>/)?.[1];
+    assert.ok(encoded);
+    const bytes = Buffer.from(encoded, 'base64'), length = bytes.readUInt32LE(0) + 12;
+    assert.ok(length <= bytes.length, 'Premiereの保存時パディングより前の本文データが完全である');
+    const data = sourceBytes(bytes.subarray(0, length));
+    assert.equal(data.runCount, 1); assert.equal(data.fontCount, 1); assert.equal(data.font, 'NotoSansJP-Black');
+    return data.text;
+  });
+  assert.deepEqual(text, ['ネオンの光で登場', '表面を光が走る']);
+  const media = blocks('Media');
+  assert.equal(media.length, 2);
+  media.forEach(value => {
+    assert.match(value, /<Title>Graphic<\/Title>/);
+    assert.match(value, /<FilePath>1196574294<\/FilePath>/);
+    assert.match(value, /<ActualMediaFilePath>1196574294<\/ActualMediaFilePath>/);
+  });
 });
 
 function sourceData(xml) {
   const encoded = xml.match(/<name>Source Text<\/name><hash>[^<]+<\/hash><value>([^<]+)<\/value>/)?.[1];
   assert.ok(encoded, 'Source Textを持つ');
-  const bytes = Buffer.from(encoded, 'base64');
+  return sourceBytes(Buffer.from(encoded, 'base64'));
+}
+
+function sourceBytes(bytes) {
   assert.equal(bytes.readUInt32LE(0), bytes.length - 12);
   assert.equal(bytes.readUInt32LE(8), 0x11223344);
   const table = p => {
@@ -85,8 +135,23 @@ function sourceData(xml) {
     text: string(ref(part[0])), font: string(ref(fonts + 4)), rgb };
 }
 
-const videoTracks = xml => [...xml.matchAll(/<track>([\s\S]*?)<\/track>/g)].map(match => match[1]);
-const graphicClips = track => [...track.matchAll(/<clipitem\b[\s\S]*?<\/clipitem>/g)].map(match => match[0]);
+// 同名のtrack/clipitemを含むネストを途中で切らず、外側の要素だけを取り出す。
+function outerElements(xml, tag) {
+  const result = []; let depth = 0, start = 0;
+  for (const match of xml.matchAll(new RegExp(`<\\/?${tag}\\b[^>]*>`, 'g'))) {
+    if (match[0].startsWith('</')) {
+      assert.ok(depth > 0, `${tag}の開始タグがある`);
+      if (--depth === 0) result.push(xml.slice(start, match.index + match[0].length));
+    } else if (match[0].endsWith('/>')) {
+      if (depth === 0) result.push(match[0]);
+    } else if (depth++ === 0) start = match.index;
+  }
+  assert.equal(depth, 0, `${tag}の閉じタグがある`);
+  return result;
+}
+const videoTracks = xml => outerElements(xml, 'track');
+const graphicClips = track => outerElements(track, 'clipitem');
+const outsideSequences = xml => outerElements(xml, 'sequence').reduce((out, nested) => out.replace(nested, ''), xml);
 const closeTo = (actual, expected, epsilon = 1e-5) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} ≈ ${expected}`);
 
 function assertPaint(d, fields, colorKey, modeKey, gradientKey, expected) {
@@ -137,7 +202,7 @@ test('フチ付き演出の本文はV1の1クリップ1文字レイヤーと編�
       assert.deepEqual(xmlStyleWarnings(style, preset.sample), []);
       const sequence = buildTextXml({ W, H, items: [{ text: preset.sample, t: .5, d: 3, style, bounds: { width: 600, height: style.size } }], fontName: 'NotoSansJP-Black' });
       const xml = videoTracks(sequence)[0];
-      assert.equal((xml.match(/<clipitem /g) || []).length, 1);
+      assert.equal(graphicClips(xml).length, 1, 'V1は本文の最外側クリップ1個');
       assert.equal((xml.match(/<name>Source Text<\/name>/g) || []).length, 1);
       assert.match(xml, /<mediaSource>GraphicAndType<\/mediaSource>/);
       assert.match(xml, /<effectid>basic<\/effectid>/);
@@ -158,9 +223,10 @@ test('フチ付き演出の本文はV1の1クリップ1文字レイヤーと編�
         assert.equal(d.bytes.readUInt32LE(t[5]), 2, 'フチを外側へ描く');
         assert.deepEqual(d.rgb(t[0]), stroke.color.slice(1).match(/../g).map(n => parseInt(n, 16)));
       });
-      assert.match(xml, /<keyframe><when>90<\/when><value>0<\/value><\/keyframe>/);
+      const motion = outsideSequences(xml);
+      assert.match(motion, /<keyframe><when>90<\/when><value>0<\/value><\/keyframe>/);
       assert.doesNotMatch(xml, /<pathurl>|\.png|\.mp4|\.mogrt/);
-      const frames = [...xml.matchAll(/<when>(\d+)<\/when>/g)].map(m => Number(m[1]));
+      const frames = [...motion.matchAll(/<when>(\d+)<\/when>/g)].map(m => Number(m[1]));
       assert.ok(frames.every(f => f >= 0 && f <= 90));
       assert.ok(frames.length < 150);
     }
@@ -198,9 +264,9 @@ test('デザインの塗り・フチの未対応グラデーション指定を�
   }
 });
 
-test('20デザインと11演出で書体・サイズ・単色/グラデーション・1〜4本のフチを編集可能な文字へ渡す', () => {
-  assert.equal(Object.keys(DESIGN_VARIANTS).length, 20);
-  assert.equal(Object.keys(XML_PRESETS).length, 11);
+test('22デザインと15演出で書体・サイズ・単色/グラデーション・1〜4本のフチを編集可能な文字へ渡す', () => {
+  assert.equal(Object.keys(DESIGN_VARIANTS).length, 22);
+  assert.equal(Object.keys(XML_PRESETS).length, 15);
   for (const aspect of ['portrait', 'landscape']) for (const fx of Object.keys(XML_PRESETS)) for (const [id, variant] of Object.entries(DESIGN_VARIANTS)) {
     const initial = { ...newDraft(), fx, aspect, text: '編集できるテロップ' };
     const draft = selectDesign(initial, id), style = designStyle(draft);
@@ -217,36 +283,39 @@ test('20デザインと11演出で書体・サイズ・単色/グラデーショ
     assertEditableStyle(sourceData(main), style, expectedFont.postscriptName, draft.text);
     if (aspect === 'landscape') assert.deepEqual(style.pos, [960, 900]);
     assert.equal(style.rotate || 0, 0);
-    assert.equal((main.match(/<clipitem /g) || []).length, 1);
+    assert.equal(graphicClips(main).length, 1);
     assert.equal((main.match(/<name>Source Text<\/name>/g) || []).length, 1);
     assert.match(xml, /<effectid>basic<\/effectid>/);
     assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
   }
 });
 
-test('用途別の書体が混在する全20案バッチで各クリップのPostScript名・装飾・時間を保持する', () => {
-  const snapshot = { ...newDraft(), fx: 'xml_reaction', text: '同じ文章で比べます', duration: 2.5 };
-  const items = Object.keys(DESIGN_VARIANTS).map((id, i) => {
-    const draft = selectDesign(snapshot, id), style = designStyle(draft);
-    return { text: draft.text, t: i * (snapshot.duration + 1) + .5, d: snapshot.duration, style, fontName: fontForStyle(draft, style).postscriptName };
-  });
-  assert.equal(items.length, 20);
-  assert.equal(new Set(items.map(item => item.fontName)).size, 5, '推奨の5書体を混在させる');
-  const before = JSON.stringify(items);
-  const xml = buildTextXml({ name: '全デザイン20案', items, fontName: 'FallbackFont-Regular' });
-  const clips = [...xml.matchAll(/<clipitem\b[\s\S]*?<\/clipitem>/g)].map(match => match[0]);
-  assert.equal(clips.length, items.length);
-  clips.forEach((clip, i) => {
-    const item = items[i];
-    assertEditableStyle(sourceData(clip), item.style, item.fontName, item.text);
-    assert.equal((clip.match(/<name>Source Text<\/name>/g) || []).length, 1);
-    assert.match(clip, new RegExp(`<start>${Math.round(item.t * 30)}</start><end>${Math.round((item.t + item.d) * 30)}</end>`));
-  });
-  assert.equal(JSON.stringify(items), before);
-  assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
+test('用途別の書体が混在する全22案バッチで各クリップのPostScript名・装飾・時間を保持する', () => {
+  for (const fx of ['xml_reaction', 'xml_surface_sweep', 'xml_surface_double']) {
+    const snapshot = { ...newDraft(), fx, text: '同じ文章で比べます', duration: 2.5 };
+    const items = Object.keys(DESIGN_VARIANTS).map((id, i) => {
+      const draft = selectDesign(snapshot, id), style = designStyle(draft);
+      return { text: draft.text, t: i * (snapshot.duration + 1) + .5, d: snapshot.duration, style,
+        bounds: { width: 600, height: style.size }, fontName: fontForStyle(draft, style).postscriptName };
+    });
+    assert.equal(items.length, 22);
+    assert.equal(new Set(items.map(item => item.fontName)).size, 5, '推奨の5書体を混在させる');
+    const before = JSON.stringify(items);
+    const xml = buildTextXml({ name: '全デザイン22案', items, fontName: 'FallbackFont-Regular' });
+    const clips = graphicClips(videoTracks(xml)[0]);
+    assert.equal(clips.length, items.length);
+    clips.forEach((clip, i) => {
+      const item = items[i];
+      assertEditableStyle(sourceData(clip), item.style, item.fontName, item.text);
+      assert.equal((clip.match(/<name>Source Text<\/name>/g) || []).length, 1);
+      assert.match(clip, new RegExp(`<start>${Math.round(item.t * 30)}</start><end>${Math.round((item.t + item.d) * 30)}</end>`));
+    });
+    assert.equal(JSON.stringify(items), before);
+    assert.doesNotMatch(xml, /<generatoritem|<pathurl>|\.png|\.mp4|\.mogrt/);
+  }
 });
 
-test('キラキラ3種は本文のSource Textを変えず、別トラックの編集可能な星へ保存する', () => {
+test('キラキラ5種は本文のSource Textを変えず、別トラックの編集可能な星へ保存する', () => {
   for (const [W, H] of [[1920, 1080], [1080, 1920]]) for (const sparkle of SPARKLE_TYPES) {
     const style = { ...nativeStyles(W > H ? 'landscape' : 'portrait').xml_pop, sparkle };
     const item = { text: '文字は一度で編集できます', t: .5, d: 3, style, bounds: { width: 580, height: style.size }, fontName: 'NotoSerifJP-Black' };
@@ -296,7 +365,7 @@ test('キラキラ3種は本文のSource Textを変えず、別トラックの�
 test('キラキラのバッチは本文の時間を保ち、星トラックを重複なしで再利用し全IDを一意にする', () => {
   const items = SPARKLE_TYPES.map((sparkle, i) => ({ text: `本文${i + 1}`, t: i * 2 + .5, d: 1.5,
     style: { ...nativeStyles('landscape').xml_pop, sparkle }, bounds: { width: 460 + i * 80, height: 110 },
-    fontName: ['NotoSansJP-Black', 'YuGothic-Bold', 'NotoSerifJP-Black'][i] }));
+    fontName: ['NotoSansJP-Black', 'YuGothic-Bold', 'NotoSerifJP-Black', 'YuMincho-Demibold', 'NotoSansJP-Bold'][i] }));
   const xml = buildTextXml({ items: [...items].reverse() }), tracks = videoTracks(xml);
   const expected = items.map(item => getSparkleClips({ ...item, W: 1920, H: 1080 }));
   assert.equal(tracks.length, Math.max(...expected.map(clips => clips.length)) + 1);
@@ -315,7 +384,7 @@ test('キラキラのバッチは本文の時間を保ち、星トラックを�
   }
   const ids = [...xml.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   assert.equal(new Set(ids).size, ids.length);
-  assert.match(xml, /<sequence[^>]*>\s*<name>[^<]*<\/name><duration>180<\/duration>/);
+  assert.match(xml, /<sequence[^>]*>\s*<name>[^<]*<\/name><duration>300<\/duration>/);
   assert.throws(() => buildTextXml({ items: [items[0], { ...items[1], t: .75 }] }), /時間を重ねない/);
 });
 
