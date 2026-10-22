@@ -32,7 +32,9 @@ PowerShellで `./admin/effects-lab/Start-Lab.ps1` を実行し、表示された
 「文字3個のXMLを保存」は、見本文字を0.5〜3.5秒・4.5〜7.5秒・8.5〜11.5秒に並べます。
 30fpsのFCP 7 XML（xmeml version 5）のText generatorです。字幕の画像・動画、MOGRT、外部素材は含みません。
 白文字・中央配置・太字という共通設定で、文章・改行・表示時間の取り込みを検証します。
-フォントは「XMLに使うフォント」で指定できます（初期値はWindowsのYu Gothic）。PCのフォントから選ぶと実際のPostScript名をXMLへ渡します。フォント本体は同梱しません。
+フォントは「XMLのフォント（PostScript名）」で指定できます（初期値は`YuGothic-Bold`）。PCのフォントから選ぶと実際の書体のPostScript名を入力します。フォント本体は同梱しません。
+`Yu Gothic`や`Noto Sans JP`という表示用のファミリー名は、そのまま渡すとこの環境のPremiereで未解決となりました。ファミリー名への自動フォールバックを廃止しています。
+すでにBold/Black等の書体を特定しているため、FCP Text generatorの`fontstyle`はPlain（1）にします。この変更後の取り込み結果は実機確認が必要です。
 **ラボのデザイン（色・フチ・傾き・影・動き・複合パーツ）や通常字幕・背景・効果音は含みません。**
 
 Premiereで新規の空プロジェクトを作り、「ファイル → 読み込み」でXMLを取り込みます。

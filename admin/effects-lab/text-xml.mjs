@@ -10,9 +10,11 @@ export function plainText(text) {
   return String(text).replace(/[{}\[\]]/g, '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '');
 }
 
-export function buildTextXml({ name = '演出ラボ_文字の読み込みテスト', W = 1920, H = 1080, items, fontName = 'Yu Gothic' }) {
+export function buildTextXml({ name = '演出ラボ_文字の読み込みテスト', W = 1920, H = 1080, items, fontName = 'YuGothic-Bold' }) {
   if (![W, H].every(n => Number.isInteger(n) && n > 0 && n <= 8192)) throw new Error('画面サイズが不正です。');
-  if (typeof fontName !== 'string' || !fontName.trim() || fontName.length > 200 || /[\u0000-\u001f]/.test(fontName)) throw new Error('フォント名が不正です。');
+  // OpenType name ID 6のPostScript名。表示用ファミリー名を変形・推測して渡さない。
+  // https://learn.microsoft.com/en-us/typography/opentype/spec/name
+  if (typeof fontName !== 'string' || !fontName.length || fontName.length > 63 || /[^\x21-\x7e]|[\[\](){}<>/%]/.test(fontName)) throw new Error('PCのフォントから選ぶか、PostScript名（例: YuGothic-Bold）を入力してください。');
   if (!Array.isArray(items) || !items.length || items.length > 100) throw new Error('1〜100個の文字を指定してください。');
   const clips = items.map((item, index) => {
     const text = plainText(item.text ?? '');
@@ -31,7 +33,7 @@ export function buildTextXml({ name = '演出ラボ_文字の読み込みテス�
 ${parameter('str', 'Text', esc(text).replace(/\n/g, '&#13;'))}
 ${parameter('fontname', 'Font', esc(fontName.trim()))}
 ${parameter('fontsize', 'Size', String(Math.round(H * .075)))}
-${parameter('fontstyle', 'Style', '2')}
+${parameter('fontstyle', 'Style', '1')}
 ${parameter('fontalign', 'Alignment', '2')}
 ${parameter('fontcolor', 'Font Color', '<alpha>255</alpha><red>255</red><green>255</green><blue>255</blue>')}
 ${parameter('origin', 'Origin', '<horiz>0</horiz><vert>0</vert>')}

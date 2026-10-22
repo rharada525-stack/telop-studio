@@ -15,7 +15,7 @@ test('PCフォントを家族名でまとめ、再読み込みしても重複を
   assert.deepEqual(await store.read(), expected);
   assert.deepEqual(await store.read(), expected);
   assert.equal(store.premiereName('テスト明朝', 900), 'TestMincho-Bold');
-  assert.equal(store.premiereName('未登録', 700), '未登録');
+  assert.equal(store.premiereName('未登録', 700), '');
 });
 
 test('選んだPCフォントの実データを読み込み、複数の太さを同じ描画名で登録する', async () => {

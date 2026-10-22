@@ -19,7 +19,7 @@ export function createLocalFontStore({ query, register }) {
   return {
     families,
     async read() { const result = await query(); fonts = result; return families(); },
-    premiereName(family, weight) { return match(family, weight)?.postscriptName || family; },
+    premiereName(family, weight) { return match(family, weight)?.postscriptName || ''; },
     cssFamily(family) { return loadedFamilies.has(family) ? aliases.get(family) : family; },
     async load(family, weight) {
       const face = match(family, weight);

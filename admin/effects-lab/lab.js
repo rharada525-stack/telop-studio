@@ -4,7 +4,7 @@ import { FX_POS, SCREEN } from '../../telop-studio/js/timeline.js';
 import { DESIGN_SETS } from '../../telop-studio/js/sets.js';
 import { EFFECTS as FX, STORAGE_KEY, SAMPLES, newDraft, validateDraft, validateStyle, sceneFor } from './model.mjs';
 import { NATIVE_PRESETS, nativeStyles } from './native-presets.mjs';
-import { buildTextXml } from './text-xml.mjs?v=20261022-fonts1';
+import { buildTextXml } from './text-xml.mjs?v=20261022-xml-font-id1';
 import { attachFontPicker } from '../../telop-studio/js/font-picker.js?v=20261022-fonts2';
 import { localFonts } from '../../telop-studio/js/local-fonts.js';
 
@@ -209,7 +209,8 @@ function bind() {
   };
   $('nativeExport').onclick = () => exportNative(false);
   $('nativeBatch').onclick = () => exportNative(true);
-  attachFontPicker($('xmlFontPicker'), { input: $('xmlFont'), getWeight: () => 700, onSelect: () => {} });
+  attachFontPicker($('xmlFontPicker'), { input: $('xmlFont'), getWeight: () => 700,
+    onSelect: family => { $('xmlFont').value = localFonts.premiereName(family, 700); } });
   $('save').onclick = async () => {
     if (!await setDraft(readControls())) return;
     const id = savedId || crypto.randomUUID();
@@ -254,7 +255,7 @@ async function exportNative(batch) {
     const items = batch ? Object.values(NATIVE_PRESETS).map((preset, index) => ({ text: preset.sample, t: index * 4 + .5, d: 3 }))
       : [{ text: draft.text, t: scene.start, d: draft.duration }];
     const name = batch ? '演出ラボ_文字3個_読み込みテスト' : '演出ラボ_文字1個_読み込みテスト';
-    const fontName = localFonts.premiereName($('xmlFont').value.trim(), 700);
+    const fontName = $('xmlFont').value;
     const xml = buildTextXml({ name, W, H, items, fontName });
     download(new Blob([xml], { type: 'application/xml;charset=utf-8' }), `${name}_${fontName.replace(/[\\/:*?"<>|]/g, '_')}.xml`);
     status('テスト用XMLを保存しました。Premiereの「ファイル → 読み込み」で取り込み、文字を書き換えられるか確認してください。装飾・動きは含みません。');
